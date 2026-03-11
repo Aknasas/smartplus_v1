@@ -1,0 +1,109 @@
+services:
+    # PostgreSQL Database with TimescaleDB
+    postgres:
+        image: timescale/timescaledb:latest-pg14
+        container_name: health_postgres
+        environment:
+            POSTGRES_DB: healthdb
+            POSTGRES_USER: healthuser
+            POSTGRES_PASSWORD: healthpass123
+        ports:
+            - "5432:5432"
+        volumes:
+            - postgres_data:/var/lib/postgresql/data
+            - ./init-scripts:/docker-entrypoint-initdb.d
+        healthcheck:
+            test: ["CMD-SHELL", "pg_isready -U healthuser -d healthdb"]
+            interval: 10s
+            timeout: 5s
+            retries: 5
+        restart: unless-stopped
+
+    # Redis for Caching
+    redis:
+        image: redis:7-alpine
+        container_name: health_redis
+        ports:
+            - "6379:6379"
+        command: redis-server --appendonly yes --requirepass redispass123
+        volumes:
+            - redis_data:/data
+        healthcheck:
+            test: ["CMD", "redis-cli", "-a", "redispass123", "ping"]
+            interval: 10s
+            timeout: 5s
+            retries: 5
+        restart: unless-stopped
+
+    # Node.js Backend Application
+    backend:
+        build:
+            context: ./backend
+            dockerfile: Dockerfile
+        container_name: health_backend
+        environment:
+            - NODE_ENV=development
+            - DB_HOST=postgres
+            - DB_PORT=5432
+            - DB_NAME=healthdb
+            - DB_USER=healthuser
+            - DB_PASSWORD=healthpass123
+            - REDIS_HOST=redis
+            - REDIS_PORT=6379
+            - REDIS_PASSWORD=redispass123
+            - PORT=4000
+            - JWT_SECRET=health-monitoring-app-super-secret-key-2026
+            - RUNNING_IN_DOCKER=true
+        ports:
+            - "4100:4000"
+        volumes:
+            - ./backend:/app
+            - /app/node_modules
+        depends_on:
+            postgres:
+                condition: service_healthy
+            redis:
+                condition: service_healthy
+        restart: unless-stopped
+        command: npm run dev
+
+    # pgAdmin (Database GUI)
+    pgadmin:
+        image: dpage/pgadmin4:latest
+        container_name: health_pgadmin
+        environment:
+            PGADMIN_DEFAULT_EMAIL: admin@health.com
+            PGADMIN_DEFAULT_PASSWORD: admin123
+        ports:
+            - "5050:80"
+        volumes:
+            - pgadmin_data:/var/lib/pgadmin
+        restart: unless-stopped
+        depends_on:
+            - postgres
+
+    # Redis Commander for Redis GUI
+    redis-commander:
+        image: rediscommander/redis-commander:latest
+        container_name: health_redis_commander
+        environment:
+            - REDIS_HOSTS=local:redis:6379
+            - REDIS_PASSWORD=redispass123
+        ports:
+            - "8081:8081"
+        restart: unless-stopped
+        depends_on:
+            - redis
+
+volumes:
+    postgres_data:
+        name: health_postgres_data
+    redis_data:
+        name: health_redis_data
+    pgadmin_data:
+        name: health_pgadmin_data
+
+networks:
+    default:
+        name: health_monitoring_network
+        driver: bridge
