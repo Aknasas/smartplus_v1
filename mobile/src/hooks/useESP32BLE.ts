@@ -474,6 +474,17 @@ export function useESP32BLE(onData: (data: ESP32SensorData) => void) {
           // Check if we're disconnecting
           if (isDisconnectingRef.current) return;
 
+          if (isDisconnectingRef.current || !lastDeviceRef.current) return;
+
+          let isConnected = false;
+          try {
+            isConnected = await device.isConnected();
+          } catch {
+            return;
+          }
+
+          if (!isConnected) return;
+
           const accelChar = await device.readCharacteristicForService(
             SERVICE_UUID,
             CHAR_ACCEL
@@ -530,6 +541,17 @@ export function useESP32BLE(onData: (data: ESP32SensorData) => void) {
         try {
           // Check if we're disconnecting
           if (isDisconnectingRef.current) return;
+
+          if (isDisconnectingRef.current || !lastDeviceRef.current) return;
+
+          let isConnected = false;
+          try {
+            isConnected = await device.isConnected();
+          } catch {
+            return;
+          }
+
+          if (!isConnected) return;
 
           const jsonChar = await device.readCharacteristicForService(
             SERVICE_UUID,
@@ -605,6 +627,9 @@ export function useESP32BLE(onData: (data: ESP32SensorData) => void) {
     }
 
     isDisconnectingRef.current = true;
+
+    const deviceToDisconnect = lastDeviceRef.current;
+    lastDeviceRef.current = null;
 
     try {
       log("Starting disconnect process...");

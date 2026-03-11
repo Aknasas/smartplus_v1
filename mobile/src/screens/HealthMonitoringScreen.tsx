@@ -1,5 +1,5 @@
-// HealthMonitoringScreen.tsx - FIXED VERSION
-import React, { useMemo, useState, useEffect } from "react";
+// HealthMonitoringScreen.tsx - FIXED DISCONNECT CRASH
+import React, { useMemo, useState, useEffect, useRef, useCallback } from "react";
 import {
   View,
   Text,
@@ -13,11 +13,9 @@ import {
 } from "react-native";
 import { LineChart } from "react-native-chart-kit";
 import Svg, { Circle } from "react-native-svg";
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 
 import useESP32BLE, { ESP32SensorData, BLEDeviceInfo } from "../hooks/useESP32BLE";
-import { healthAPI } from '../services/api';
 
 const screenWidth = Dimensions.get("window").width;
 
@@ -34,15 +32,6 @@ interface RealTimeHealthMap {
   "Body Temperature": MetricData;
   "Physical Activity": MetricData;
 }
-
-interface HistoricalData {
-  metrics: any[];
-  anomalies: any[];
-}
-
-// Constants
-const USER_ID_KEY = '@health_app_user_id';
-const USER_TOKEN_KEY = '@health_app_token';
 
 // ---------- Small Components ---------- //
 
@@ -133,20 +122,14 @@ const HealthMonitoringScreen: React.FC = () => {
   const [selectedMetric, setSelectedMetric] = useState<any>(null);
   const [isMetricModalVisible, setIsMetricModalVisible] = useState(false);
   const [isScannerVisible, setIsScannerVisible] = useState(false);
+  const [isDisconnecting, setIsDisconnecting] = useState(false);
+  const [disconnectError, setDisconnectError] = useState<string | null>(null);
 
-  // Authentication state
-  const [isLoggedIn, setIsLoggedIn] = useState<boolean>(false);
-  const [checkingLogin, setCheckingLogin] = useState<boolean>(true);
+  // Use ref to track if component is mounted
+  const isMounted = useRef(true);
 
   // Store raw acceleration data
   const [accelerationData, setAccelerationData] = useState<{x: number, y: number, z: number} | null>(null);
-
-  // Database state
-  const [dbConnected, setDbConnected] = useState<boolean>(false);
-  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
-  const [savingToDB, setSavingToDB] = useState<boolean>(false);
-  const [historicalData, setHistoricalData] = useState<HistoricalData>({ metrics: [], anomalies: [] });
-  const [loadingHistory, setLoadingHistory] = useState<boolean>(false);
 
   const [realTimeData, setRealTimeData] = useState<RealTimeHealthMap>({
     "heartRate": {
@@ -188,13 +171,35 @@ const HealthMonitoringScreen: React.FC = () => {
     scanning,
     deviceName,
     devices,
-    scanForDevices,
-    connectToDevice,
-    disconnect,
+    scanForDevices: hookScanForDevices,
+    connectToDevice: hookConnectToDevice,
+    disconnect: hookDisconnect,
     currentData,
   } = useESP32BLE(updateHealthData);
 
-  // ✅ ALL HOOKS MUST BE AT THE TOP LEVEL - BEFORE ANY CONDITIONAL RETURNS
+  // Set isMounted to false on unmount
+  useEffect(() => {
+    return () => {
+      console.log('HealthMonitoringScreen unmounting');
+      isMounted.current = false;
+
+      // Don't try to update state here, just log
+    };
+  }, []);
+
+  // Reset states when component loses focus
+  useFocusEffect(
+    useCallback(() => {
+      // When screen comes into focus
+      return () => {
+        // When screen loses focus
+        if (isMounted.current) {
+          // Don't disconnect, just reset any temporary states
+          setDisconnectError(null);
+        }
+      };
+    }, [])
+  );
 
   // Gauges values - useMemo hooks
   const heartRateValue = useMemo(() => {
@@ -216,182 +221,24 @@ const HealthMonitoringScreen: React.FC = () => {
   const isSpO2Empty = realTimeData["Blood Oxygen"].current.includes("--");
   const isTempEmpty = realTimeData["Body Temperature"].current.includes("--");
 
-  // Effects
-  useEffect(() => {
-    checkLoginStatus();
-  }, []);
-
-  // Check if user is logged in
-  const checkLoginStatus = async () => {
-    setCheckingLogin(true);
-    try {
-      const token = await AsyncStorage.getItem(USER_TOKEN_KEY);
-      const userId = await AsyncStorage.getItem(USER_ID_KEY);
-
-      if (token && userId) {
-        // User is logged in
-        setIsLoggedIn(true);
-        setCurrentUserId(userId);
-
-        // Now connect to database and load data
-        await testDBConnection();
-        if (userId) {
-          await loadHistoricalData(userId);
-        }
-      } else {
-        // No user logged in
-        setIsLoggedIn(false);
-        setCurrentUserId(null);
-      }
-    } catch (error) {
-      console.error('Error checking login status:', error);
-    } finally {
-      setCheckingLogin(false);
-    }
-  };
-
-  // Handle login
-  const handleLogin = async (userId: string, token: string) => {
-    try {
-      await AsyncStorage.setItem(USER_ID_KEY, userId);
-      await AsyncStorage.setItem(USER_TOKEN_KEY, token);
-      setIsLoggedIn(true);
-      setCurrentUserId(userId);
-
-      // Connect to database after login
-      await testDBConnection();
-      await loadHistoricalData(userId);
-
-      Alert.alert('Success', 'Logged in successfully!');
-    } catch (error) {
-      console.error('Error saving login data:', error);
-    }
-  };
-
-  // Handle logout
-  const handleLogout = async () => {
-    try {
-      await AsyncStorage.removeItem(USER_ID_KEY);
-      await AsyncStorage.removeItem(USER_TOKEN_KEY);
-      setIsLoggedIn(false);
-      setCurrentUserId(null);
-      setDbConnected(false);
-      setHistoricalData({ metrics: [], anomalies: [] });
-
-      // Navigate to login screen
-      navigation.navigate('Login' as never);
-    } catch (error) {
-      console.error('Error logging out:', error);
-    }
-  };
-
-  // Test database connection (only if logged in)
-  const testDBConnection = async () => {
-    if (!isLoggedIn) return;
-
-    try {
-      console.log('Testing DB connection...');
-      const response = await healthAPI.testDB();
-      console.log('DB Connected:', response.data);
-      setDbConnected(true);
-    } catch (error) {
-      console.error('DB Connection Failed:', error);
-      setDbConnected(false);
-    }
-  };
-
-  // Load historical data (only if logged in)
-  const loadHistoricalData = async (userId: string) => {
-    if (!isLoggedIn) return;
-
-    setLoadingHistory(true);
-    try {
-      const [metricsRes, anomaliesRes] = await Promise.all([
-        healthAPI.getMetrics(userId),
-        healthAPI.getAnomalies(userId)
-      ]);
-
-      setHistoricalData({
-        metrics: metricsRes.data,
-        anomalies: anomaliesRes.data
-      });
-
-      console.log(`Loaded ${metricsRes.data.length} metrics and ${anomaliesRes.data.length} anomalies`);
-    } catch (error) {
-      console.error('Error loading historical data:', error);
-    } finally {
-      setLoadingHistory(false);
-    }
-  };
-
-  // Save health metric to database (only if logged in)
-  const saveMetricToDB = async (type: string, value: number, unit: string) => {
-    if (!isLoggedIn || !currentUserId || !dbConnected) return;
-
-    setSavingToDB(true);
-    try {
-      await healthAPI.addMetric({
-        user_id: currentUserId,
-        metric_type: type,
-        value: value,
-        unit: unit,
-        device_id: deviceName || 'ESP32'
-      });
-      console.log(`Saved ${type} to database: ${value} ${unit}`);
-    } catch (error) {
-      console.error('Error saving to database:', error);
-    } finally {
-      setSavingToDB(false);
-    }
-  };
-
-  // Check for anomalies (only if logged in)
-  const checkAndSaveAnomaly = async (type: string, value: number, unit: string) => {
-    if (!isLoggedIn || !currentUserId || !dbConnected) return;
-
-    let isAnomaly = false;
-    let severity: 'low' | 'medium' | 'high' | 'critical' = 'low';
-
-    switch (type) {
-      case 'heart_rate':
-        if (value < 60 || value > 100) {
-          isAnomaly = true;
-          severity = value < 50 || value > 120 ? 'high' : 'medium';
-        }
-        break;
-      case 'blood_oxygen':
-        if (value < 95) {
-          isAnomaly = true;
-          severity = value < 90 ? 'critical' : 'high';
-        }
-        break;
-      case 'body_temperature':
-        if (value < 36 || value > 38) {
-          isAnomaly = true;
-          severity = value < 35 || value > 39 ? 'critical' : 'high';
-        }
-        break;
-    }
-
-    if (isAnomaly) {
-      console.log(`⚠️ Anomaly detected: ${type} = ${value} ${unit} (${severity})`);
-
-      if (severity === 'critical' || severity === 'high') {
-        Alert.alert(
-          '⚠️ Health Alert',
-          `Abnormal ${type} detected: ${value} ${unit}`,
-          [{ text: 'OK' }]
-        );
-      }
-    }
-  };
-
   // Helper: push numeric value into pastWeek with max length
   const pushToPastWeek = (arr: number[], v: number, max = 20) =>
     [...arr.slice(-max + 1), v];
 
+  // Safe state update function
+const safeSetState = <T,>(
+  setter: React.Dispatch<React.SetStateAction<T>> | undefined,
+  value: T
+) => {
+  if (isMounted.current && typeof setter === 'function') {
+    setter(value);
+  }
+};
+
   // Update state from BLE data
   function updateHealthData(data: ESP32SensorData) {
+    if (!isMounted.current) return;
+
     console.log("RECEIVED BLE DATA:", JSON.stringify(data));
 
     // Defensive parsing
@@ -401,34 +248,13 @@ const HealthMonitoringScreen: React.FC = () => {
       ? Number(data.bodyTemperature)
       : NaN;
 
-    // Save to database ONLY if logged in
-    if (isLoggedIn && currentUserId && dbConnected) {
-      if (!isNaN(hr) && hr > 0) {
-        saveMetricToDB('heart_rate', hr, 'bpm');
-        checkAndSaveAnomaly('heart_rate', hr, 'bpm');
-      }
-      if (!isNaN(spo2) && spo2 > 0) {
-        saveMetricToDB('blood_oxygen', spo2, '%');
-        checkAndSaveAnomaly('blood_oxygen', spo2, '%');
-      }
-      if (!isNaN(bt) && bt > 0) {
-        saveMetricToDB('body_temperature', bt, 'celsius');
-        checkAndSaveAnomaly('body_temperature', bt, 'celsius');
-      }
-    }
-
     // ========== ACCELERATION DATA ==========
     if (data.acceleration) {
       console.log("ACCELERATION DATA RECEIVED:", data.acceleration);
-      setAccelerationData(data.acceleration);
+      safeSetState(setAccelerationData, data.acceleration);
 
       const { x, y, z } = data.acceleration;
       const intensity = Math.sqrt(x * x + y * y + z * z);
-
-      // Save acceleration data (only if logged in)
-      if (isLoggedIn && currentUserId && dbConnected) {
-        saveMetricToDB('acceleration_magnitude', intensity, 'g');
-      }
 
       // Process acceleration for motion detection
       processAcceleration(intensity, x, y, z);
@@ -440,17 +266,22 @@ const HealthMonitoringScreen: React.FC = () => {
       else if (intensity > 0.1) status = "Light Activity";
       else status = "Inactive";
 
-      setRealTimeData(prev => ({
-        ...prev,
-        "Physical Activity": {
-          ...prev["Physical Activity"],
-          current: status,
-          pastWeek: pushToPastWeek(prev["Physical Activity"].pastWeek, intensity),
-        }
-      }));
+      safeSetState(setRealTimeData, (prev) => {
+        if (!isMounted.current) return prev;
+        return {
+          ...prev,
+          "Physical Activity": {
+            ...prev["Physical Activity"],
+            current: status,
+            pastWeek: pushToPastWeek(prev["Physical Activity"].pastWeek, intensity),
+          }
+        };
+      });
     }
 
-    setRealTimeData((prev) => {
+    safeSetState(setRealTimeData, (prev) => {
+      if (!isMounted.current) return prev;
+
       const updated = { ...prev };
       const fingerPresent = data.fingerDetected === undefined ? true : Boolean(data.fingerDetected);
 
@@ -502,7 +333,11 @@ const HealthMonitoringScreen: React.FC = () => {
 
   // Motion processing
   const processAcceleration = (magnitude: number, x: number, y: number, z: number) => {
-    setMotionState((prev) => {
+    if (!isMounted.current) return;
+
+    safeSetState(setMotionState, (prev) => {
+      if (!isMounted.current) return prev;
+
       const now = Date.now();
       const updated = { ...prev };
 
@@ -516,11 +351,6 @@ const HealthMonitoringScreen: React.FC = () => {
         if (now - prev.lastPeakTime > 350) {
           updated.steps = prev.steps + 1;
           updated.lastPeakTime = now;
-
-          // Save steps to database (only if logged in)
-          if (isLoggedIn && currentUserId && dbConnected) {
-            saveMetricToDB('steps', updated.steps, 'count');
-          }
         }
       }
 
@@ -529,11 +359,6 @@ const HealthMonitoringScreen: React.FC = () => {
       if (magnitude > FALL_THRESHOLD) {
         updated.fallDetected = true;
         console.log("⚠️ FALL DETECTED!");
-
-        if (isLoggedIn && currentUserId && dbConnected) {
-          saveMetricToDB('fall_detected', magnitude, 'event');
-          checkAndSaveAnomaly('fall_detected', magnitude, 'event');
-        }
 
         Alert.alert(
           '⚠️ FALL DETECTED',
@@ -545,7 +370,12 @@ const HealthMonitoringScreen: React.FC = () => {
         );
 
         setTimeout(() => {
-          setMotionState((p) => ({ ...p, fallDetected: false }));
+          if (isMounted.current) {
+            safeSetState(setMotionState, (p) => {
+              if (!isMounted.current) return p;
+              return { ...p, fallDetected: false };
+            });
+          }
         }, 3500);
       }
 
@@ -556,11 +386,8 @@ const HealthMonitoringScreen: React.FC = () => {
         const variance = recent.reduce((s, v) => s + (v - mean) ** 2, 0) / recent.length;
         updated.tremorDetected = variance > 0.2 && magnitude < 2.0;
 
-        if (updated.tremorDetected && !prev.tremorDetected && isLoggedIn) {
+        if (updated.tremorDetected && !prev.tremorDetected) {
           console.log("⚠️ TREMOR DETECTED!");
-          if (currentUserId && dbConnected) {
-            saveMetricToDB('tremor_detected', variance, 'event');
-          }
         }
       }
 
@@ -574,283 +401,312 @@ const HealthMonitoringScreen: React.FC = () => {
   };
 
   const handleMetricPress = (metric: keyof RealTimeHealthMap) => {
-    setSelectedMetric({ ...realTimeData[metric], name: metric });
-    setIsMetricModalVisible(true);
+    safeSetState(setSelectedMetric, { ...realTimeData[metric], name: metric });
+    safeSetState(setIsMetricModalVisible, true);
   };
 
   const closeMetricModal = () => {
-    setIsMetricModalVisible(false);
-    setSelectedMetric(null);
+    safeSetState(setIsMetricModalVisible, false);
+    safeSetState(setSelectedMetric, null);
   };
 
   const openScanner = async () => {
-    setIsScannerVisible(true);
-    await scanForDevices();
+    safeSetState(setIsScannerVisible, true);
+    try {
+      await hookScanForDevices();
+    } catch (error) {
+      console.error('Error scanning for devices:', error);
+      if (isMounted.current) {
+        Alert.alert('Error', 'Failed to scan for devices. Please try again.');
+      }
+    }
   };
 
   const closeScanner = () => {
-    setIsScannerVisible(false);
+    safeSetState(setIsScannerVisible, false);
   };
 
   const handleDeviceSelect = async (device: BLEDeviceInfo) => {
-    await connectToDevice(device.id);
-    setIsScannerVisible(false);
+    try {
+      await hookConnectToDevice(device.id);
+      safeSetState(setIsScannerVisible, false);
+    } catch (error) {
+      console.error('Error connecting to device:', error);
+      if (isMounted.current) {
+        Alert.alert('Connection Error', 'Failed to connect to device. Please try again.');
+      }
+    }
   };
 
-  // ✅ CONDITIONAL RENDERING IS FINE - AFTER ALL HOOKS
-
-  // Show loading screen while checking login
-  if (checkingLogin) {
-    return (
-      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
-        <ActivityIndicator size="large" color="#76c7c0" />
-        <Text style={{ color: '#FFF', marginTop: 10 }}>Checking login status...</Text>
-      </View>
-    );
+// FINAL CLEAN DISCONNECT HANDLER
+const handleDisconnect = async () => {
+  if (isDisconnecting) {
+    console.log('Disconnect already in progress');
+    return;
   }
 
-  // Show login required message if not logged in
-  if (!isLoggedIn) {
-    return (
-      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
-        <Text style={[styles.title, { textAlign: 'center', marginBottom: 20 }]}>
-          🔒 Login Required
-        </Text>
-        <Text style={{ color: '#FFF', textAlign: 'center', marginBottom: 30 }}>
-          Please log in to view your health data and sync with the database.
-        </Text>
-        <TouchableOpacity
-          style={connectionStyles.connectButton}
-          onPress={() => navigation.navigate('Login' as never)}
-        >
-          <Text style={connectionStyles.connectText}>Go to Login</Text>
-        </TouchableOpacity>
-      </View>
-    );
+  console.log('=== SAFE DISCONNECT STARTED ===');
+
+  if (isMounted.current) {
+    setIsDisconnecting(true);
   }
 
-  // Rest of your return statement (when logged in)
+  try {
+    // Step 1: Clear all UI data first
+    console.log('Step 1: Clearing UI data...');
+
+    if (isMounted.current) {
+      setAccelerationData(null);
+      setRealTimeData({
+        "heartRate": { current: "-- bpm", pastWeek: [], anomalyCheck: (d) => d.some((v) => v < 60 || v > 100) },
+        "Blood Oxygen": { current: "--%", pastWeek: [], anomalyCheck: (d) => d.some((v) => v < 95) },
+        "Body Temperature": { current: "--°C", pastWeek: [], anomalyCheck: (d) => d.some((v) => v < 36 || v > 38) },
+        "Physical Activity": { current: "Inactive", pastWeek: [], anomalyCheck: (d) => d.some((v) => v < 20) },
+      });
+      setMotionState({
+        motionIntensity: [],
+        steps: 0,
+        lastPeakTime: 0,
+        fallDetected: false,
+        tremorDetected: false,
+        calories: 0
+      });
+    }
+
+    // Step 2: Small delay for UI to update
+    await new Promise(resolve => setTimeout(resolve, 50));
+
+    // Step 3: Disconnect BLE device
+    console.log('Step 2: Disconnecting BLE...');
+    try {
+      await hookDisconnect();
+      console.log('BLE disconnected successfully');
+    } catch (hookError) {
+      console.error('BLE disconnect error (ignored):', hookError);
+    }
+
+  } catch (error) {
+    console.error('Unexpected error during disconnect:', error);
+  } finally {
+    // Step 4: Reset disconnecting state
+    setTimeout(() => {
+      if (isMounted.current) {
+        setIsDisconnecting(false);
+        console.log('=== DISCONNECT COMPLETE ===');
+      }
+    }, 500);
+  }
+};
+
+  // Use callback for disconnect to prevent recreation
+  const confirmDisconnect = useCallback(() => {
+    Alert.alert(
+      'Disconnect Device',
+      'Are you sure you want to disconnect?',
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel',
+          onPress: () => {
+            console.log('Disconnect cancelled');
+          }
+        },
+        {
+          text: 'Disconnect',
+          style: 'destructive',
+          onPress: handleDisconnect
+        }
+      ],
+      { cancelable: true }
+    );
+  }, []);
+
   return (
     <View style={styles.container}>
       <Text style={styles.title}>Health Data Monitoring</Text>
 
-      {/* User Info & Logout */}
-      <View style={connectionStyles.statusContainer}>
-        <Text style={[connectionStyles.statusText, { flex: 1 }]}>
-          👤 User ID: {currentUserId?.substring(0, 8)}...
-        </Text>
-        <TouchableOpacity
-          style={[connectionStyles.disconnectButton, { backgroundColor: '#f44336' }]}
-          onPress={handleLogout}
-        >
-          <Text style={connectionStyles.disconnectText}>Logout</Text>
-        </TouchableOpacity>
-      </View>
-
-      {/* BLE Connection Status */}
-      <View style={connectionStyles.statusContainer}>
-        <View
-          style={[
-            connectionStyles.statusIndicator,
-            { backgroundColor: connected ? "#4CAF50" : "#f44336" },
-          ]}
-        />
-        <View style={{ flex: 1 }}>
-          <Text style={connectionStyles.statusText}>
-            {connected
-              ? `BLE: ${deviceName ?? "ESP32"}`
-              : "BLE Disconnected"}
-          </Text>
-        </View>
-        {!connected ? (
-          <TouchableOpacity
-            style={connectionStyles.connectButton}
-            onPress={openScanner}
-            disabled={connecting || scanning}
-          >
-            <Text style={connectionStyles.connectText}>Scan</Text>
-          </TouchableOpacity>
-        ) : (
-          <TouchableOpacity
-            style={connectionStyles.disconnectButton}
-            onPress={disconnect}
-          >
-            <Text style={connectionStyles.disconnectText}>Disconnect</Text>
-          </TouchableOpacity>
-        )}
-      </View>
-
-      {/* Database Connection Status */}
-      <View style={connectionStyles.statusContainer}>
-        <View
-          style={[
-            connectionStyles.statusIndicator,
-            { backgroundColor: dbConnected ? "#4CAF50" : "#f44336" },
-          ]}
-        />
-        <Text style={connectionStyles.statusText}>
-          Database: {dbConnected ? "Connected" : "Disconnected"}
-        </Text>
-        {savingToDB && <ActivityIndicator size="small" color="#76c7c0" style={{ marginLeft: 8 }} />}
-      </View>
-
-      {/* Dashboard Gauges */}
-      <View style={gaugeStyles.row}>
-        <GaugeCard
-          title="Heart Rate"
-          value={heartRateValue}
-          unit=" bpm"
-          min={40}
-          max={160}
-          isEmpty={isHeartRateEmpty}
-        />
-        <GaugeCard
-          title="SpO₂"
-          value={spo2Value}
-          unit="%"
-          min={80}
-          max={100}
-          isEmpty={isSpO2Empty}
-        />
-        <GaugeCard
-          title="Temperature"
-          value={tempValue}
-          unit="°C"
-          min={34}
-          max={40}
-          isEmpty={isTempEmpty}
-        />
-      </View>
-
-      {/* Finger Detection Status */}
-      <View style={fingerStyles.container}>
-        <View style={[
-          fingerStyles.indicator,
-          { backgroundColor: currentData.fingerDetected ? "#4CAF50" : "#f44336" }
-        ]} />
-        <Text style={fingerStyles.text}>
-          Finger: {currentData.fingerDetected ? "Detected" : "Not Detected"}
-        </Text>
-      </View>
-
-      {/* Acceleration Data Display */}
-      {accelerationData && (
-        <View style={accelStyles.container}>
-          <Text style={accelStyles.title}>Acceleration (g)</Text>
-          <View style={accelStyles.row}>
-            <View style={accelStyles.axis}>
-              <Text style={accelStyles.axisLabel}>X</Text>
-              <Text style={accelStyles.axisValue}>{accelerationData.x.toFixed(2)}</Text>
-            </View>
-            <View style={accelStyles.axis}>
-              <Text style={accelStyles.axisLabel}>Y</Text>
-              <Text style={accelStyles.axisValue}>{accelerationData.y.toFixed(2)}</Text>
-            </View>
-            <View style={accelStyles.axis}>
-              <Text style={accelStyles.axisLabel}>Z</Text>
-              <Text style={accelStyles.axisValue}>{accelerationData.z.toFixed(2)}</Text>
-            </View>
-            <View style={accelStyles.axis}>
-              <Text style={accelStyles.axisLabel}>Total</Text>
-              <Text style={accelStyles.axisValue}>
-                {Math.sqrt(
-                  accelerationData.x * accelerationData.x +
-                  accelerationData.y * accelerationData.y +
-                  accelerationData.z * accelerationData.z
-                ).toFixed(2)}
-              </Text>
-            </View>
-          </View>
-        </View>
-      )}
-
-      {/* Activity / Motion card */}
-      <View style={cardStyles.card}>
-        <Text style={cardStyles.metric}>Physical Activity</Text>
-        <Text style={[cardStyles.value, { fontSize: 20 }]}>
-          {realTimeData["Physical Activity"].current}
-        </Text>
-
-        <View style={{ marginTop: 8 }}>
-          <Text style={{ color: "#FFF" }}>Steps: {motionState.steps}</Text>
-          <Text style={{ color: motionState.fallDetected ? "red" : "#FFF" }}>
-            {motionState.fallDetected ? "⚠ Fall detected" : "No fall"}
-          </Text>
-          <Text style={{ color: motionState.tremorDetected ? "orange" : "#FFF" }}>
-            {motionState.tremorDetected ? "Tremor detected" : "No tremor"}
-          </Text>
-          <Text style={{ color: "#FFF" }}>
-            Calories: {motionState.calories.toFixed(2)} kcal
-          </Text>
-        </View>
-
-        {/* Motion chart */}
-        {motionState.motionIntensity.length > 0 && (
-          <View style={{ marginTop: 12 }}>
-            <Text style={{ fontSize: 12, color: "#FFF", marginBottom: 4 }}>
-              Motion Intensity (Last 30 samples)
+      {/* Wrap everything in ScrollView */}
+      <ScrollView
+        showsVerticalScrollIndicator={true}
+        contentContainerStyle={styles.scrollContent}
+      >
+        {/* BLE Connection Status */}
+        <View style={connectionStyles.statusContainer}>
+          <View
+            style={[
+              connectionStyles.statusIndicator,
+              { backgroundColor: connected ? "#4CAF50" : "#f44336" },
+            ]}
+          />
+          <View style={{ flex: 1 }}>
+            <Text style={connectionStyles.statusText}>
+              {connected
+                ? `BLE: Connected to ${deviceName ?? "ESP32"}`
+                : "BLE Disconnected"}
             </Text>
-            <LineChart
-              data={{
-                labels: [],
-                datasets: [{ data: motionState.motionIntensity.slice(-30) }],
-              }}
-              width={screenWidth - 40}
-              height={140}
-              chartConfig={{
-                backgroundGradientFrom: "#1A1F3E",
-                backgroundGradientTo: "#1A1F3E",
-                decimalPlaces: 2,
-                color: () => `rgba(118, 199, 192, 1)`,
-                labelColor: () => `rgba(255,255,255,0.6)`,
-                style: { borderRadius: 8 },
-              }}
-              bezier
-              style={{ borderRadius: 8 }}
-            />
+            {isDisconnecting && (
+              <Text style={connectionStyles.disconnectingText}>Disconnecting...</Text>
+            )}
+            {disconnectError && (
+              <Text style={connectionStyles.errorText}>Error: {disconnectError}</Text>
+            )}
           </View>
-        )}
-      </View>
-
-      {/* Historical Data Section - Only shown if logged in */}
-      {isLoggedIn && (
-        <View style={cardStyles.card}>
-          <Text style={cardStyles.metric}>Historical Data</Text>
-          {loadingHistory ? (
-            <ActivityIndicator size="small" color="#76c7c0" />
+          {!connected ? (
+            <TouchableOpacity
+              style={connectionStyles.connectButton}
+              onPress={openScanner}
+              disabled={connecting || scanning || isDisconnecting}
+            >
+              <Text style={connectionStyles.connectText}>
+                {connecting || scanning ? "Scanning..." : "Connect Device"}
+              </Text>
+            </TouchableOpacity>
           ) : (
-            <>
-              <Text style={{ color: '#FFF', marginTop: 8 }}>
-                📊 Metrics: {historicalData.metrics.length} readings
+            <TouchableOpacity
+              style={[connectionStyles.disconnectButton, isDisconnecting && connectionStyles.disabledButton]}
+              onPress={confirmDisconnect}
+              disabled={isDisconnecting}
+            >
+              <Text style={connectionStyles.disconnectText}>
+                {isDisconnecting ? "Disconnecting..." : "Disconnect"}
               </Text>
-              <Text style={{ color: '#FFF' }}>
-                ⚠️ Anomalies: {historicalData.anomalies.length} detected
-              </Text>
-              {historicalData.anomalies.slice(0, 3).map((anomaly: any) => (
-                <View key={anomaly.anomaly_id} style={{ marginTop: 8, padding: 8, backgroundColor: 'rgba(255,107,107,0.1)', borderRadius: 6 }}>
-                  <Text style={{ color: '#FF6B6B', fontSize: 12 }}>
-                    • {anomaly.metric_type}: {anomaly.actual_value} ({anomaly.severity})
-                  </Text>
-                  <Text style={{ color: 'rgba(255,255,255,0.5)', fontSize: 10 }}>
-                    {new Date(anomaly.detected_at).toLocaleString()}
-                  </Text>
-                </View>
-              ))}
-            </>
+            </TouchableOpacity>
           )}
         </View>
-      )}
 
-      {/* Health Cards List */}
-      <ScrollView contentContainerStyle={styles.cardContainer}>
-        {Object.keys(realTimeData).map((metric) => (
-          <HealthDataCard
-            key={metric}
-            metric={metric}
-            value={realTimeData[metric as keyof RealTimeHealthMap].current}
-            onPress={() => handleMetricPress(metric as keyof RealTimeHealthMap)}
+        {/* Dashboard Gauges */}
+        <View style={gaugeStyles.row}>
+          <GaugeCard
+            title="Heart Rate"
+            value={heartRateValue}
+            unit=" bpm"
+            min={40}
+            max={160}
+            isEmpty={isHeartRateEmpty}
           />
-        ))}
+          <GaugeCard
+            title="SpO₂"
+            value={spo2Value}
+            unit="%"
+            min={80}
+            max={100}
+            isEmpty={isSpO2Empty}
+          />
+          <GaugeCard
+            title="Temperature"
+            value={tempValue}
+            unit="°C"
+            min={34}
+            max={40}
+            isEmpty={isTempEmpty}
+          />
+        </View>
+
+        {/* Finger Detection Status */}
+        <View style={fingerStyles.container}>
+          <View style={[
+            fingerStyles.indicator,
+            { backgroundColor: currentData?.fingerDetected ? "#4CAF50" : "#f44336" }
+          ]} />
+          <Text style={fingerStyles.text}>
+            Finger: {currentData?.fingerDetected ? "Detected" : "Not Detected"}
+          </Text>
+        </View>
+
+        {/* Acceleration Data Display */}
+        {accelerationData && (
+          <View style={accelStyles.container}>
+            <Text style={accelStyles.title}>Acceleration (g)</Text>
+            <View style={accelStyles.row}>
+              <View style={accelStyles.axis}>
+                <Text style={accelStyles.axisLabel}>X</Text>
+                <Text style={accelStyles.axisValue}>{accelerationData.x.toFixed(2)}</Text>
+              </View>
+              <View style={accelStyles.axis}>
+                <Text style={accelStyles.axisLabel}>Y</Text>
+                <Text style={accelStyles.axisValue}>{accelerationData.y.toFixed(2)}</Text>
+              </View>
+              <View style={accelStyles.axis}>
+                <Text style={accelStyles.axisLabel}>Z</Text>
+                <Text style={accelStyles.axisValue}>{accelerationData.z.toFixed(2)}</Text>
+              </View>
+              <View style={accelStyles.axis}>
+                <Text style={accelStyles.axisLabel}>Total</Text>
+                <Text style={accelStyles.axisValue}>
+                  {Math.sqrt(
+                    accelerationData.x * accelerationData.x +
+                    accelerationData.y * accelerationData.y +
+                    accelerationData.z * accelerationData.z
+                  ).toFixed(2)}
+                </Text>
+              </View>
+            </View>
+          </View>
+        )}
+
+        {/* Activity / Motion card */}
+        <View style={cardStyles.card}>
+          <Text style={cardStyles.metric}>Physical Activity</Text>
+          <Text style={[cardStyles.value, { fontSize: 20 }]}>
+            {realTimeData["Physical Activity"].current}
+          </Text>
+
+          <View style={{ marginTop: 8 }}>
+            <Text style={{ color: "#FFF" }}>Steps: {motionState.steps}</Text>
+            <Text style={{ color: motionState.fallDetected ? "red" : "#FFF" }}>
+              {motionState.fallDetected ? "⚠ Fall detected" : "No fall"}
+            </Text>
+            <Text style={{ color: motionState.tremorDetected ? "orange" : "#FFF" }}>
+              {motionState.tremorDetected ? "Tremor detected" : "No tremor"}
+            </Text>
+            <Text style={{ color: "#FFF" }}>
+              Calories: {motionState.calories.toFixed(2)} kcal
+            </Text>
+          </View>
+
+          {/* Motion chart */}
+          {motionState.motionIntensity.length > 0 && (
+            <View style={{ marginTop: 12 }}>
+              <Text style={{ fontSize: 12, color: "#FFF", marginBottom: 4 }}>
+                Motion Intensity (Last 30 samples)
+              </Text>
+              <LineChart
+                data={{
+                  labels: [],
+                  datasets: [{ data: motionState.motionIntensity.slice(-30) }],
+                }}
+                width={screenWidth - 40}
+                height={140}
+                chartConfig={{
+                  backgroundGradientFrom: "#1A1F3E",
+                  backgroundGradientTo: "#1A1F3E",
+                  decimalPlaces: 2,
+                  color: () => `rgba(118, 199, 192, 1)`,
+                  labelColor: () => `rgba(255,255,255,0.6)`,
+                  style: { borderRadius: 8 },
+                }}
+                bezier
+                style={{ borderRadius: 8 }}
+              />
+            </View>
+          )}
+        </View>
+
+        {/* Health Cards List */}
+        <Text style={styles.sectionTitle}>Detailed Metrics</Text>
+        <View style={styles.cardContainer}>
+          {Object.keys(realTimeData).map((metric) => (
+            <HealthDataCard
+              key={metric}
+              metric={metric}
+              value={realTimeData[metric as keyof RealTimeHealthMap].current}
+              onPress={() => handleMetricPress(metric as keyof RealTimeHealthMap)}
+            />
+          ))}
+        </View>
+
+        {/* Add some bottom padding for better scrolling experience */}
+        <View style={{ height: 20 }} />
       </ScrollView>
 
       {/* Metric Chart Modal */}
@@ -932,7 +788,7 @@ const HealthMonitoringScreen: React.FC = () => {
             <View style={scannerStyles.footerRow}>
               <TouchableOpacity
                 style={scannerStyles.refreshButton}
-                onPress={scanForDevices}
+                onPress={openScanner}
                 disabled={scanning}
               >
                 <Text style={scannerStyles.refreshText}>
@@ -954,7 +810,7 @@ const HealthMonitoringScreen: React.FC = () => {
   );
 };
 
-// Styles remain exactly the same...
+// Updated Styles
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -968,8 +824,18 @@ const styles = StyleSheet.create({
     marginBottom: 20,
     color: "#FFF",
   },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: "600",
+    color: "#FFF",
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  scrollContent: {
+    paddingBottom: 30,
+  },
   cardContainer: {
-    paddingBottom: 20,
+    // No need for paddingBottom here as we have it in scrollContent
   },
 });
 
@@ -1042,15 +908,15 @@ const connectionStyles = StyleSheet.create({
     color: "#FFF",
     flex: 1,
   },
-  inlineLoading: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginTop: 4,
-  },
-  loadingText: {
-    marginLeft: 6,
+  disconnectingText: {
     fontSize: 12,
-    color: "rgba(255, 255, 255, 0.6)",
+    color: "#FFA726",
+    marginTop: 2,
+  },
+  errorText: {
+    fontSize: 12,
+    color: "#f44336",
+    marginTop: 2,
   },
   connectButton: {
     backgroundColor: "#42A5F5",
@@ -1062,6 +928,7 @@ const connectionStyles = StyleSheet.create({
   connectText: {
     color: "white",
     fontWeight: "bold",
+    fontSize: 12,
   },
   disconnectButton: {
     backgroundColor: "#f44336",
@@ -1070,9 +937,13 @@ const connectionStyles = StyleSheet.create({
     borderRadius: 6,
     marginLeft: 8,
   },
+  disabledButton: {
+    opacity: 0.5,
+  },
   disconnectText: {
     color: "white",
     fontWeight: "bold",
+    fontSize: 12,
   },
 });
 

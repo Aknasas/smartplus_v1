@@ -222,77 +222,77 @@
 				{
 					"directoryIndex" : 0,
 					"id" : "appmodules::@6890427a1f51a3e7e1df",
-					"jsonFile" : "target-appmodules-Debug-723fe4d43447bcc7ea55.json",
+					"jsonFile" : "target-appmodules-Debug-dd800001b668ca68080d.json",
 					"name" : "appmodules",
 					"projectIndex" : 0
 				},
 				{
 					"directoryIndex" : 3,
 					"id" : "react_codegen_BlePlx::@0d03ad0a4a63aefc401b",
-					"jsonFile" : "target-react_codegen_BlePlx-Debug-98c8b1ad9c31fab19f54.json",
+					"jsonFile" : "target-react_codegen_BlePlx-Debug-1ad6dce86b5325a2fffc.json",
 					"name" : "react_codegen_BlePlx",
 					"projectIndex" : 0
 				},
 				{
 					"directoryIndex" : 9,
 					"id" : "react_codegen_RNVectorIconsSpec::@479809fae146501fd34d",
-					"jsonFile" : "target-react_codegen_RNVectorIconsSpec-Debug-50363d7608b54a766667.json",
+					"jsonFile" : "target-react_codegen_RNVectorIconsSpec-Debug-46506e887ac0a88e05da.json",
 					"name" : "react_codegen_RNVectorIconsSpec",
 					"projectIndex" : 0
 				},
 				{
 					"directoryIndex" : 2,
 					"id" : "react_codegen_lottiereactnative::@0fa4dc904d7e359a99fb",
-					"jsonFile" : "target-react_codegen_lottiereactnative-Debug-d8ad928975eb4120d4d6.json",
+					"jsonFile" : "target-react_codegen_lottiereactnative-Debug-29a6ec0d2aa41c4bf0e1.json",
 					"name" : "react_codegen_lottiereactnative",
 					"projectIndex" : 0
 				},
 				{
 					"directoryIndex" : 1,
 					"id" : "react_codegen_rnasyncstorage::@1596841e19ec5b9eeffe",
-					"jsonFile" : "target-react_codegen_rnasyncstorage-Debug-c039ed10cc8568494ad2.json",
+					"jsonFile" : "target-react_codegen_rnasyncstorage-Debug-b4ceaebdc8ad6aa3eea3.json",
 					"name" : "react_codegen_rnasyncstorage",
 					"projectIndex" : 0
 				},
 				{
 					"directoryIndex" : 4,
 					"id" : "react_codegen_rngesturehandler_codegen::@39f233abcd2c728bc6ec",
-					"jsonFile" : "target-react_codegen_rngesturehandler_codegen-Debug-5e89c71021491b764448.json",
+					"jsonFile" : "target-react_codegen_rngesturehandler_codegen-Debug-bdf80c08eeb60e3cb29b.json",
 					"name" : "react_codegen_rngesturehandler_codegen",
 					"projectIndex" : 0
 				},
 				{
 					"directoryIndex" : 5,
 					"id" : "react_codegen_rnreanimated::@8afabad14bfffa3f8b9a",
-					"jsonFile" : "target-react_codegen_rnreanimated-Debug-5ebad3c0627ffc2d4eda.json",
+					"jsonFile" : "target-react_codegen_rnreanimated-Debug-ab61b6c7342b332cf857.json",
 					"name" : "react_codegen_rnreanimated",
 					"projectIndex" : 0
 				},
 				{
 					"directoryIndex" : 7,
 					"id" : "react_codegen_rnscreens::@25bcbd507e98d3a854ad",
-					"jsonFile" : "target-react_codegen_rnscreens-Debug-e203f52f103d1204c619.json",
+					"jsonFile" : "target-react_codegen_rnscreens-Debug-b2e233977f5160d2c834.json",
 					"name" : "react_codegen_rnscreens",
 					"projectIndex" : 0
 				},
 				{
 					"directoryIndex" : 8,
 					"id" : "react_codegen_rnsvg::@4f40eb209d0c0b4a3b65",
-					"jsonFile" : "target-react_codegen_rnsvg-Debug-9f7d45a860e3225738a1.json",
+					"jsonFile" : "target-react_codegen_rnsvg-Debug-970877bed85fd91db644.json",
 					"name" : "react_codegen_rnsvg",
 					"projectIndex" : 0
 				},
 				{
 					"directoryIndex" : 10,
 					"id" : "react_codegen_rnworklets::@68f58d84d4754f193387",
-					"jsonFile" : "target-react_codegen_rnworklets-Debug-4e2a86ed378234607aac.json",
+					"jsonFile" : "target-react_codegen_rnworklets-Debug-8692c68053ee6203c54b.json",
 					"name" : "react_codegen_rnworklets",
 					"projectIndex" : 0
 				},
 				{
 					"directoryIndex" : 6,
 					"id" : "react_codegen_safeareacontext::@7984cd80db47aa7b952a",
-					"jsonFile" : "target-react_codegen_safeareacontext-Debug-307e58a30e2aa68ccb5b.json",
+					"jsonFile" : "target-react_codegen_safeareacontext-Debug-1dd27d6033a4772fc104.json",
 					"name" : "react_codegen_safeareacontext",
 					"projectIndex" : 0
 				}
@@ -302,7 +302,7 @@
 	"kind" : "codemodel",
 	"paths" : 
 	{
-		"build" : "E:/smartplus_v1/mobile/android/app/.cxx/Debug/501o5v5i/x86",
+		"build" : "E:/smartplus_v1/mobile/android/app/.cxx/Debug/501o5v5i/armeabi-v7a",
 		"source" : "E:/smartplus_v1/mobile/node_modules/react-native/ReactAndroid/cmake-utils/default-app-setup"
 	},
 	"version" : 

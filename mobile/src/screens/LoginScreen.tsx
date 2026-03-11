@@ -1,4 +1,4 @@
-// LoginScreen.tsx - UPDATED with correct API imports
+// LoginScreen.tsx - UPDATED to save user details
 import React, { useState, useEffect } from "react";
 import {
   View,
@@ -51,15 +51,8 @@ export default function LoginScreen({ navigation }) {
       const userId = await AsyncStorage.getItem('@health_app_user_id');
 
       if (token && userId) {
-        // Optional: Verify token with server
-        try {
-          await verifyToken();
-          // If token is valid, navigate to Home
-          navigation.replace("MainTabs");
-        } catch (error) {
-          // Token invalid, clear storage
-          await logout();
-        }
+        // If token is valid, navigate to Home
+        navigation.replace("MainTabs");
       }
     } catch (error) {
       console.error('Error checking login status:', error);
@@ -110,6 +103,15 @@ export default function LoginScreen({ navigation }) {
       const response = await login(username.trim(), password);
 
       console.log('✅ Login response:', response);
+
+      // Save user details to AsyncStorage
+      if (response.data && response.data.user) {
+        await AsyncStorage.setItem('@health_app_token', response.data.token);
+        await AsyncStorage.setItem('@health_app_user_id', response.data.user.user_id?.toString() || response.data.user.id?.toString());
+        await AsyncStorage.setItem('@health_app_username', response.data.user.username || username);
+        await AsyncStorage.setItem('@health_app_fullname', response.data.user.full_name || response.data.user.fullName || fullName || username);
+        await AsyncStorage.setItem('@health_app_email', response.data.user.email || email || '');
+      }
 
       Alert.alert("Success", "Login successful!");
 
@@ -428,4 +430,3 @@ export default function LoginScreen({ navigation }) {
     </KeyboardAvoidingView>
   );
 }
-export default LoginScreen;
