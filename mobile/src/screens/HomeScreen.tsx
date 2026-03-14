@@ -15,6 +15,7 @@ import {
 import Icon from "react-native-vector-icons/FontAwesome";
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
+import { getMetrics, getAnomalies } from '../services';
 
 const { width } = Dimensions.get('window');
 
@@ -151,12 +152,10 @@ export default function HomeScreen({ navigation }) {
           {/* Logo/App Icon */}
           <View style={styles.logoContainer}>
             <Image
-              source={require("../assets/images/myimage.jpg")}
+              source={require("../assets/images/sp_logo.png")}
               style={styles.logo}
             />
-            <View style={styles.logoBadge}>
-              <Icon name="plus" size={10} color="#FFF" />
-            </View>
+
           </View>
 
           {/* Login/Logout Button */}

@@ -341,7 +341,7 @@ const styles = StyleSheet.create({
   },
   tabBarIndicator: {
     position: 'absolute',
-    top: -18,
+    top: -30,
     left: '50%',
     marginLeft: -20,
     width: 40,

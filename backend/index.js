@@ -1,76 +1,41 @@
 // backend/index.js
 require('dotenv').config();
 const express = require('express');
-const { Pool } = require('pg');
 const cors = require('cors');
-const bcrypt = require('bcrypt');
-const jwt = require('jsonwebtoken');
+const pool = require('./config/database');
+
+// Import routes
+const authRoutes = require('./routes/auth');
+const userRoutes = require('./routes/users');
+const metricRoutes = require('./routes/metrics');
+const anomalyRoutes = require('./routes/anomalies');
+const emergencyRoutes = require('./routes/emergency');
+const reminderRoutes = require('./routes/reminders');
+const targetRoutes = require('./routes/targets');
+const systemRoutes = require('./routes/system');
 
 const app = express();
+const PORT = process.env.PORT || 4100;
+
+// Middleware
 app.use(cors());
 app.use(express.json());
-
-// ==================== CONFIGURATION ====================
-const isDocker = process.env.RUNNING_IN_DOCKER === 'true';
-
-const dbConfig = {
-  host: isDocker ? 'postgres' : 'localhost',
-  port: process.env.DB_PORT || 5432,
-  database: process.env.DB_NAME || 'healthdb',
-  user: process.env.DB_USER || 'healthuser',
-  password: process.env.DB_PASSWORD || 'healthpass123',
-  connectionTimeoutMillis: 5000
-};
-
-const PORT = process.env.PORT || 4100;
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
-
-console.log('Starting Health Monitoring Backend');
-console.log(`Mode: ${isDocker ? 'DOCKER' : 'LOCAL'}`);
-console.log(`🗄Database: ${dbConfig.host}:${dbConfig.port}/${dbConfig.database}`);
-console.log(`User: ${dbConfig.user}`);
-
-const pool = new Pool(dbConfig);
 
 // ==================== DATABASE INIT ====================
 async function initDB() {
   const client = await pool.connect();
   try {
-    // Create users table
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS users (
-        user_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        username VARCHAR(50) UNIQUE NOT NULL,
-        password VARCHAR(255) NOT NULL,
-        email VARCHAR(255) UNIQUE NOT NULL,
-        name VARCHAR(255),
-        role VARCHAR(50) DEFAULT 'patient',
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      )
+    const tables = await client.query(`
+      SELECT table_name
+      FROM information_schema.tables
+      WHERE table_schema = 'public'
     `);
-    console.log('Users table ready');
 
-    // Check if we have users
+    console.log('Available tables:', tables.rows.map(t => t.table_name).join(', '));
+
     const userCount = await client.query('SELECT COUNT(*) FROM users');
-    if (parseInt(userCount.rows[0].count) === 0) {
-      console.log('Creating sample users...');
-      const sampleUsers = [
-        ['john_doe', 'john@example.com', 'John Doe', 'patient'],
-        ['jane_smith', 'jane@example.com', 'Jane Smith', 'patient'],
-        ['dr_silva', 'dr.silva@hospital.com', 'Dr. Silva', 'doctor']
-      ];
+    console.log(`Total users in database: ${userCount.rows[0].count}`);
 
-      for (const [username, email, name, role] of sampleUsers) {
-        const hashedPassword = await bcrypt.hash('password123', 10);
-        await client.query(
-          `INSERT INTO users (username, password, email, name, role)
-           VALUES ($1, $2, $3, $4, $5)
-           ON CONFLICT (username) DO NOTHING`,
-          [username, hashedPassword, email, name, role]
-        );
-      }
-      console.log('Sample users created (password: password123)');
-    }
   } catch (err) {
     console.error('DB Init error:', err.message);
   } finally {
@@ -78,129 +43,83 @@ async function initDB() {
   }
 }
 
-// ==================== AUTH MIDDLEWARE ====================
-const authenticateToken = (req, res, next) => {
-  const token = req.headers.authorization?.split(' ')[1];
-  if (!token) return res.status(401).json({ error: 'Token required' });
+// ==================== ROUTES ====================
+// IMPORTANT: Mount auth routes FIRST
+app.use('/api/users', authRoutes);        // Auth routes (register, login, verify, forgot-password, reset-password)
+app.use('/api/users', userRoutes);        // User management routes
+app.use('/api', metricRoutes);             // Metrics routes
+app.use('/api', anomalyRoutes);            // Anomalies routes
+app.use('/api', emergencyRoutes);          // Emergency contacts routes
+app.use('/api', reminderRoutes);           // Reminders routes
+app.use('/api', targetRoutes);             // Health targets routes
+app.use('/', systemRoutes);                // System routes (health, test-db, etc.)
 
-  jwt.verify(token, JWT_SECRET, (err, user) => {
-    if (err) return res.status(403).json({ error: 'Invalid token' });
-    req.user = user;
-    next();
+// Log all registered routes for debugging
+console.log('\n=== Registered Routes ===');
+const listRoutes = (stack, basePath = '') => {
+  stack.forEach(layer => {
+    if (layer.route) {
+      const methods = Object.keys(layer.route.methods).join(', ').toUpperCase();
+      console.log(`${methods} ${basePath}${layer.route.path}`);
+    } else if (layer.name === 'router' && layer.handle.stack) {
+      listRoutes(layer.handle.stack, basePath + (layer.regexp.source.replace('\\/?(?=\\/|$)', '').replace(/\\\//g, '/')));
+    }
   });
 };
-
-// ==================== ROUTES ====================
-
-// Health check
-app.get('/health', async (req, res) => {
-  const health = { status: 'OK', timestamp: new Date().toISOString(), mode: isDocker ? 'docker' : 'local' };
-  try {
-    await pool.query('SELECT 1');
-    health.database = 'connected';
-  } catch (err) {
-    health.database = 'disconnected';
-    health.error = err.message;
-  }
-  res.json(health);
-});
-
-// Register
-app.post('/api/users/register', async (req, res) => {
-  try {
-    const { username, password, email, name, role = 'patient' } = req.body;
-    if (!username || !password || !email || !name) {
-      return res.status(400).json({ error: 'All fields required' });
-    }
-
-    const hashedPassword = await bcrypt.hash(password, 10);
-    const result = await pool.query(
-      `INSERT INTO users (username, password, email, name, role)
-       VALUES ($1, $2, $3, $4, $5)
-       RETURNING user_id, username, email, name, role`,
-      [username, hashedPassword, email, name, role]
-    );
-
-    const token = jwt.sign(
-      { user_id: result.rows[0].user_id, username, role },
-      JWT_SECRET,
-      { expiresIn: '7d' }
-    );
-
-    res.json({ success: true, token, user: result.rows[0] });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Login
-app.post('/api/users/login', async (req, res) => {
-  try {
-    const { username, password } = req.body;
-    const result = await pool.query(
-      'SELECT user_id, username, password, email, name, role FROM users WHERE username = $1',
-      [username]
-    );
-
-    if (result.rows.length === 0) {
-      return res.status(401).json({ error: 'Invalid credentials' });
-    }
-
-    const user = result.rows[0];
-    const valid = await bcrypt.compare(password, user.password);
-    if (!valid) {
-      return res.status(401).json({ error: 'Invalid credentials' });
-    }
-
-    const token = jwt.sign(
-      { user_id: user.user_id, username: user.username, role: user.role },
-      JWT_SECRET,
-      { expiresIn: '7d' }
-    );
-
-    delete user.password;
-    res.json({ success: true, token, user });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Get users
-app.get('/api/users', async (req, res) => {
-  try {
-    const result = await pool.query(
-      'SELECT user_id, username, email, name, role, created_at FROM users ORDER BY created_at DESC'
-    );
-    res.json({ success: true, users: result.rows });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+listRoutes(app._router.stack);
+console.log('=======================\n');
 
 // ==================== START SERVER ====================
 async function startServer() {
   try {
     const client = await pool.connect();
-    console.log('Database connected!');
+    console.log('Database connected successfully!');
     client.release();
+
     await initDB();
 
     app.listen(PORT, '0.0.0.0', () => {
-      console.log('\n' + '='.repeat(50));
+      console.log('\n' + '='.repeat(60));
       console.log(`Server running on http://localhost:${PORT}`);
-      console.log('='.repeat(50));
-      console.log('Test users:');
-      console.log('   john_doe / password123');
-      console.log('   jane_smith / password123');
-      console.log('   dr_silva / password123');
-      console.log('='.repeat(50));
+      console.log('='.repeat(60));
+      console.log('Available endpoints:');
+      console.log('   POST /api/users/register        - Register new user');
+      console.log('   POST /api/users/login           - User login');
+      console.log('   POST /api/users/forgot-password - Request password reset');
+      console.log('   POST /api/users/reset-password  - Reset password with token');
+      console.log('   GET  /api/users/verify          - Verify token');
+      console.log('   GET  /api/users                  - Get all users');
+      console.log('   GET  /api/users/:userId          - Get user by ID');
+      console.log('   GET  /api/users/:userId/metrics  - Get user metrics');
+      console.log('   GET  /api/users/:userId/anomalies - Get user anomalies');
+      console.log('   GET  /health                    - Health check');
+      console.log('='.repeat(60));
+      console.log('Test users (password: password123):');
+      console.log('   john_doe, jane_smith, bob_wilson, dr_silva');
+      console.log('='.repeat(60));
     });
   } catch (err) {
     console.error('Database connection failed:', err.message);
+    console.log('\n Starting server in LIMITED mode (database unavailable)');
+
     app.listen(PORT, '0.0.0.0', () => {
-      console.log(`Server running in LIMITED mode on http://localhost:${PORT}`);
+      console.log(`  Server running in LIMITED mode on http://localhost:${PORT}`);
+      console.log('   Database is not available. Some features will not work.');
     });
   }
 }
 
 startServer();
+
+// Handle graceful shutdown
+process.on('SIGTERM', async () => {
+  console.log('SIGTERM received, closing connections...');
+  await pool.end();
+  process.exit(0);
+});
+
+process.on('SIGINT', async () => {
+  console.log('SIGINT received, closing connections...');
+  await pool.end();
+  process.exit(0);
+});
