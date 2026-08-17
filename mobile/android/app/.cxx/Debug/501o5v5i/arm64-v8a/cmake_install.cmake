@@ -45,6 +45,7 @@ endif()
 if(NOT CMAKE_INSTALL_LOCAL_ONLY)
   # Include the install script for each subdirectory.
   include("E:/smartplus_v1/mobile/android/app/.cxx/Debug/501o5v5i/arm64-v8a/rnasyncstorage_autolinked_build/cmake_install.cmake")
+  include("E:/smartplus_v1/mobile/android/app/.cxx/Debug/501o5v5i/arm64-v8a/RNCNetInfoSpec_autolinked_build/cmake_install.cmake")
   include("E:/smartplus_v1/mobile/android/app/.cxx/Debug/501o5v5i/arm64-v8a/lottiereactnative_autolinked_build/cmake_install.cmake")
   include("E:/smartplus_v1/mobile/android/app/.cxx/Debug/501o5v5i/arm64-v8a/BlePlx_autolinked_build/cmake_install.cmake")
   include("E:/smartplus_v1/mobile/android/app/.cxx/Debug/501o5v5i/arm64-v8a/rngesturehandler_codegen_autolinked_build/cmake_install.cmake")

@@ -1,4 +1,4 @@
-// HealthMonitoringScreen.tsx - FIXED DISCONNECT CRASH
+// HealthMonitoringScreen.tsx - WITH ALL DATA SENT TOGETHER
 import React, { useMemo, useState, useEffect, useRef, useCallback } from "react";
 import {
   View,
@@ -14,7 +14,10 @@ import {
 import { LineChart } from "react-native-chart-kit";
 import Svg, { Circle } from "react-native-svg";
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
+// IMPORT CORRECTIONS: Use named imports from the services
+import { addMetric, getMetrics, getAnomalies } from "../services";
 import useESP32BLE, { ESP32SensorData, BLEDeviceInfo } from "../hooks/useESP32BLE";
 
 const screenWidth = Dimensions.get("window").width;
@@ -24,6 +27,9 @@ interface MetricData {
   current: string;
   pastWeek: number[];
   anomalyCheck: (data: number[]) => boolean;
+  timestamps?: string[];
+  unit: string;
+  metric_type: string;
 }
 
 interface RealTimeHealthMap {
@@ -31,6 +37,29 @@ interface RealTimeHealthMap {
   "Blood Oxygen": MetricData;
   "Body Temperature": MetricData;
   "Physical Activity": MetricData;
+}
+
+interface UserInfo {
+  userId: string;
+  patientId: string;
+  username: string;
+  fullname: string;
+  role: string;
+}
+
+// Data buffer for 2-minute aggregation
+interface DataBuffer {
+  heartRate: number[];
+  spo2: number[];
+  temperature: number[];
+  activity: number[];
+  timestamps: Date[];
+}
+
+// Simple alert state (no persistent tracking)
+interface SimpleAlertState {
+  isActive: boolean;
+  message: string;
 }
 
 // ---------- Small Components ---------- //
@@ -124,6 +153,36 @@ const HealthMonitoringScreen: React.FC = () => {
   const [isScannerVisible, setIsScannerVisible] = useState(false);
   const [isDisconnecting, setIsDisconnecting] = useState(false);
   const [disconnectError, setDisconnectError] = useState<string | null>(null);
+  const [currentUser, setCurrentUser] = useState<UserInfo | null>(null);
+  const [loadingUser, setLoadingUser] = useState(true);
+  const [historicalData, setHistoricalData] = useState<any>(null);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+
+  // Force update counter for gauges
+  const [updateCounter, setUpdateCounter] = useState(0);
+
+  // Data buffer for 2-minute aggregation
+  const [dataBuffer, setDataBuffer] = useState<DataBuffer>({
+    heartRate: [],
+    spo2: [],
+    temperature: [],
+    activity: [],
+    timestamps: []
+  });
+
+  // Simple alert states (just for showing immediate warnings)
+  const [heartRateAlert, setHeartRateAlert] = useState<SimpleAlertState>({
+    isActive: false,
+    message: ''
+  });
+  const [spo2Alert, setSpo2Alert] = useState<SimpleAlertState>({
+    isActive: false,
+    message: ''
+  });
+  const [temperatureAlert, setTemperatureAlert] = useState<SimpleAlertState>({
+    isActive: false,
+    message: ''
+  });
 
   // Use ref to track if component is mounted
   const isMounted = useRef(true);
@@ -136,21 +195,33 @@ const HealthMonitoringScreen: React.FC = () => {
       current: "-- bpm",
       pastWeek: [],
       anomalyCheck: (d) => d.some((v) => v < 60 || v > 100),
+      unit: "bpm",
+      metric_type: "heart_rate",
+      timestamps: [],
     },
     "Blood Oxygen": {
       current: "--%",
       pastWeek: [],
       anomalyCheck: (d) => d.some((v) => v < 95),
+      unit: "%",
+      metric_type: "spo2",
+      timestamps: [],
     },
     "Body Temperature": {
       current: "--°C",
       pastWeek: [],
       anomalyCheck: (d) => d.some((v) => v < 36 || v > 38),
+      unit: "°C",
+      metric_type: "temperature",
+      timestamps: [],
     },
     "Physical Activity": {
       current: "Inactive",
       pastWeek: [],
       anomalyCheck: (d) => d.some((v) => v < 20),
+      unit: "g",
+      metric_type: "activity",
+      timestamps: [],
     },
   });
 
@@ -177,65 +248,524 @@ const HealthMonitoringScreen: React.FC = () => {
     currentData,
   } = useESP32BLE(updateHealthData);
 
-  // Set isMounted to false on unmount
+  // Load current user from AsyncStorage
   useEffect(() => {
+    loadCurrentUser();
     return () => {
       console.log('HealthMonitoringScreen unmounting');
       isMounted.current = false;
-
-      // Don't try to update state here, just log
     };
   }, []);
+
+  // Load historical data when user is loaded
+  useEffect(() => {
+    if (currentUser?.patientId) {
+      loadHistoricalData();
+    }
+  }, [currentUser]);
 
   // Reset states when component loses focus
   useFocusEffect(
     useCallback(() => {
-      // When screen comes into focus
       return () => {
-        // When screen loses focus
         if (isMounted.current) {
-          // Don't disconnect, just reset any temporary states
           setDisconnectError(null);
         }
       };
     }, [])
   );
 
-  // Gauges values - useMemo hooks
+  // Force update function for gauges
+  const forceGaugeUpdate = useCallback(() => {
+    setUpdateCounter(prev => prev + 1);
+  }, []);
+
+  // Load current user from AsyncStorage
+  const loadCurrentUser = async () => {
+    try {
+      const userId = await AsyncStorage.getItem('@health_app_user_id');
+      const patientId = await AsyncStorage.getItem('@health_app_patient_id') || userId;
+      const username = await AsyncStorage.getItem('@health_app_username');
+      const fullname = await AsyncStorage.getItem('@health_app_fullname');
+      const role = await AsyncStorage.getItem('@health_app_user_role');
+
+      if (userId) {
+        setCurrentUser({
+          userId,
+          patientId: patientId || userId,
+          username: username || '',
+          fullname: fullname || '',
+          role: role || 'patient',
+        });
+        console.log('✅ Current user loaded:', { userId, patientId });
+      } else {
+        console.log('❌ No user logged in');
+        Alert.alert(
+          'Not Logged In',
+          'Please log in to view health data',
+          [{ text: 'OK', onPress: () => navigation.navigate('Login' as never) }]
+        );
+      }
+    } catch (error) {
+      console.error('Error loading user:', error);
+    } finally {
+      setLoadingUser(false);
+    }
+  };
+
+  // Load historical data from database
+  const loadHistoricalData = async () => {
+    if (!currentUser?.patientId) return;
+
+    setLoadingHistory(true);
+    try {
+      // Load last 20 heart rate readings
+      const heartRateData = await getMetrics(currentUser.patientId, {
+        metric_type: 'heart_rate',
+        limit: 20,
+        days: 7
+      });
+
+      // Load last 20 SpO2 readings
+      const spo2Data = await getMetrics(currentUser.patientId, {
+        metric_type: 'spo2',
+        limit: 20,
+        days: 7
+      });
+
+      // Load last 20 temperature readings
+      const tempData = await getMetrics(currentUser.patientId, {
+        metric_type: 'temperature',
+        limit: 20,
+        days: 7
+      });
+
+      // Load anomalies
+      const anomalies = await getAnomalies(currentUser.patientId, {
+        limit: 10,
+        resolved: false
+      });
+
+      console.log('📊 Historical data loaded:', {
+        heartRate: heartRateData.metrics?.length || 0,
+        spo2: spo2Data.metrics?.length || 0,
+        temp: tempData.metrics?.length || 0,
+        anomalies: anomalies.anomalies?.length || 0
+      });
+
+      // Update realTimeData with historical values
+      setRealTimeData(prev => ({
+        ...prev,
+        "heartRate": {
+          ...prev["heartRate"],
+          pastWeek: heartRateData.metrics?.map((m: any) => m.value) || [],
+          timestamps: heartRateData.metrics?.map((m: any) => m.time) || [],
+        },
+        "Blood Oxygen": {
+          ...prev["Blood Oxygen"],
+          pastWeek: spo2Data.metrics?.map((m: any) => m.value) || [],
+          timestamps: spo2Data.metrics?.map((m: any) => m.time) || [],
+        },
+        "Body Temperature": {
+          ...prev["Body Temperature"],
+          pastWeek: tempData.metrics?.map((m: any) => m.value) || [],
+          timestamps: tempData.metrics?.map((m: any) => m.time) || [],
+        },
+      }));
+
+      setHistoricalData({ heartRateData, spo2Data, tempData, anomalies });
+      forceGaugeUpdate();
+
+    } catch (error) {
+      console.error('Error loading historical data:', error);
+    } finally {
+      setLoadingHistory(false);
+    }
+  };
+
+  // Gauges values - fixed with proper dependencies
   const heartRateValue = useMemo(() => {
     const val = parseFloat(realTimeData["heartRate"].current);
     return isNaN(val) ? 0 : val;
-  }, [realTimeData]);
+  }, [realTimeData["heartRate"].current, updateCounter]);
 
   const spo2Value = useMemo(() => {
     const val = parseFloat(realTimeData["Blood Oxygen"].current);
     return isNaN(val) ? 0 : val;
-  }, [realTimeData]);
+  }, [realTimeData["Blood Oxygen"].current, updateCounter]);
 
   const tempValue = useMemo(() => {
     const val = parseFloat(realTimeData["Body Temperature"].current);
     return isNaN(val) ? 0 : val;
-  }, [realTimeData]);
+  }, [realTimeData["Body Temperature"].current, updateCounter]);
 
-  const isHeartRateEmpty = realTimeData["heartRate"].current.includes("--");
-  const isSpO2Empty = realTimeData["Blood Oxygen"].current.includes("--");
-  const isTempEmpty = realTimeData["Body Temperature"].current.includes("--");
+  const isHeartRateEmpty = useMemo(() => {
+    return realTimeData["heartRate"].current.includes("--") ||
+           realTimeData["heartRate"].current === "0 bpm";
+  }, [realTimeData["heartRate"].current, updateCounter]);
+
+  const isSpO2Empty = useMemo(() => {
+    return realTimeData["Blood Oxygen"].current.includes("--") ||
+           realTimeData["Blood Oxygen"].current === "0%";
+  }, [realTimeData["Blood Oxygen"].current, updateCounter]);
+
+  const isTempEmpty = useMemo(() => {
+    return realTimeData["Body Temperature"].current.includes("--") ||
+           realTimeData["Body Temperature"].current === "0°C";
+  }, [realTimeData["Body Temperature"].current, updateCounter]);
 
   // Helper: push numeric value into pastWeek with max length
   const pushToPastWeek = (arr: number[], v: number, max = 20) =>
     [...arr.slice(-max + 1), v];
 
   // Safe state update function
-const safeSetState = <T,>(
-  setter: React.Dispatch<React.SetStateAction<T>> | undefined,
-  value: T
-) => {
-  if (isMounted.current && typeof setter === 'function') {
-    setter(value);
-  }
-};
+  const safeSetState = <T,>(
+    setter: React.Dispatch<React.SetStateAction<T>> | undefined,
+    value: T
+  ) => {
+    if (isMounted.current && typeof setter === 'function') {
+      setter(value);
+    }
+  };
 
-  // Update state from BLE data
+  // Calculate average of array
+  const calculateAverage = (arr: number[]): number => {
+    if (arr.length === 0) return 0;
+    const sum = arr.reduce((a, b) => a + b, 0);
+    return sum / arr.length;
+  };
+
+  // Check if value is anomaly
+  const isAnomaly = (metricType: string, value: number): boolean => {
+    switch(metricType) {
+      case 'heart_rate':
+        return value < 50 || value > 120;
+      case 'spo2':
+        return value < 95;
+      case 'temperature':
+        return value < 36 || value > 38;
+      default:
+        return false;
+    }
+  };
+
+  // Improved finger detection
+  const isFingerPresent = useCallback((data: ESP32SensorData, hr: number, spo2: number): boolean => {
+    // 1. If explicitly provided, use that
+    if (data.fingerDetected !== undefined) {
+      if (typeof data.fingerDetected === 'boolean') return data.fingerDetected;
+      if (typeof data.fingerDetected === 'number') return data.fingerDetected === 1;
+      if (typeof data.fingerDetected === 'string') {
+        return data.fingerDetected === '1' ||
+               data.fingerDetected.toLowerCase() === 'true';
+      }
+    }
+
+    // 2. If we're getting plausible vital signs, assume finger is present
+    const hasPlausibleHeartRate = !Number.isNaN(hr) && hr > 40 && hr < 150;
+    const hasPlausibleSpO2 = !Number.isNaN(spo2) && spo2 > 85 && spo2 <= 100;
+
+    if (hasPlausibleHeartRate || hasPlausibleSpO2) {
+      return true;
+    }
+
+    // 3. Default to false if no evidence
+    return false;
+  }, []);
+
+  // Helper to convert activity status to numeric value
+  const getActivityStatusValue = (status: string): number => {
+    switch(status) {
+      case 'Running': return 3;
+      case 'Walking': return 2;
+      case 'Light Activity': return 1;
+      default: return 0;
+    }
+  };
+
+  // Save all metrics to database at once
+  const saveAllMetricsToDB = useCallback(async (
+    hr: number,
+    spo2: number,
+    bt: number,
+    activityIntensity: number,
+    activityStatus: string,
+    fingerPresent: boolean,
+    steps: number,
+    calories: number
+  ) => {
+    if (!currentUser?.patientId) {
+      console.log('❌ No patient ID, cannot save metrics');
+      return;
+    }
+
+    try {
+      // Create a batch of metrics to save
+      const timestamp = new Date().toISOString();
+      const metricsToSave = [];
+
+      // Always save heart rate if valid
+      if (!Number.isNaN(hr) && hr > 0) {
+        metricsToSave.push({
+          patient_id: currentUser.patientId,
+          metric_type: 'heart_rate',
+          value: hr,
+          unit: 'bpm',
+          finger_detected: fingerPresent,
+          device_id: deviceName || 'ESP32_BLE',
+          timestamp
+        });
+      }
+
+      // Always save SpO2 if valid
+      if (!Number.isNaN(spo2) && spo2 > 0) {
+        metricsToSave.push({
+          patient_id: currentUser.patientId,
+          metric_type: 'spo2',
+          value: spo2,
+          unit: '%',
+          finger_detected: fingerPresent,
+          device_id: deviceName || 'ESP32_BLE',
+          timestamp
+        });
+      }
+
+      // Always save temperature if valid
+      if (!Number.isNaN(bt) && bt > 0) {
+        metricsToSave.push({
+          patient_id: currentUser.patientId,
+          metric_type: 'temperature',
+          value: bt,
+          unit: '°C',
+          finger_detected: fingerPresent,
+          device_id: deviceName || 'ESP32_BLE',
+          timestamp
+        });
+      }
+
+      // Save activity data
+      if (activityIntensity > 0) {
+        metricsToSave.push({
+          patient_id: currentUser.patientId,
+          metric_type: 'activity_intensity',
+          value: Math.round(activityIntensity * 100) / 100,
+          unit: 'g',
+          finger_detected: fingerPresent,
+          device_id: deviceName || 'ESP32_BLE',
+          timestamp
+        });
+
+        metricsToSave.push({
+          patient_id: currentUser.patientId,
+          metric_type: 'activity_status',
+          value: getActivityStatusValue(activityStatus),
+          unit: 'status',
+          finger_detected: fingerPresent,
+          device_id: deviceName || 'ESP32_BLE',
+          timestamp
+        });
+      }
+
+      // Save steps and calories occasionally
+      if (steps > 0 && steps % 10 === 0) {
+        metricsToSave.push({
+          patient_id: currentUser.patientId,
+          metric_type: 'steps',
+          value: steps,
+          unit: 'steps',
+          finger_detected: fingerPresent,
+          device_id: deviceName || 'ESP32_BLE',
+          timestamp
+        });
+      }
+
+      if (calories > 0) {
+        metricsToSave.push({
+          patient_id: currentUser.patientId,
+          metric_type: 'calories',
+          value: Math.round(calories * 10) / 10,
+          unit: 'kcal',
+          finger_detected: fingerPresent,
+          device_id: deviceName || 'ESP32_BLE',
+          timestamp
+        });
+      }
+
+      // Save all metrics in parallel
+      if (metricsToSave.length > 0) {
+        console.log(` Saving ${metricsToSave.length} metrics to DB:`,
+          metricsToSave.map(m => `${m.metric_type}: ${m.value}`).join(', '));
+
+        // Save each metric individually (your API might not support batch)
+        await Promise.all(metricsToSave.map(metric => addMetric(metric)));
+
+        console.log(' All metrics saved successfully');
+      }
+    } catch (error) {
+      console.error(' Error saving metrics to DB:', error);
+    }
+  }, [currentUser, deviceName]);
+
+  // Process and save 2-minute average data
+  const processAndSaveAverageData = useCallback(() => {
+    if (!currentUser?.patientId) return;
+
+    setDataBuffer(prev => {
+      const buffer = { ...prev };
+
+      // Calculate averages
+      const avgHeartRate = calculateAverage(buffer.heartRate);
+      const avgSpo2 = calculateAverage(buffer.spo2);
+      const avgTemperature = calculateAverage(buffer.temperature);
+      const avgActivity = calculateAverage(buffer.activity);
+
+      console.log(' 2-minute averages:', {
+        heartRate: avgHeartRate.toFixed(1),
+        spo2: avgSpo2.toFixed(1),
+        temperature: avgTemperature.toFixed(1),
+        activity: avgActivity.toFixed(2),
+        samples: buffer.heartRate.length
+      });
+
+      // Save averages to database
+      const timestamp = new Date().toISOString();
+      const avgMetrics = [];
+
+      if (avgHeartRate > 0) {
+        avgMetrics.push({
+          patient_id: currentUser.patientId,
+          metric_type: 'heart_rate_avg',
+          value: avgHeartRate,
+          unit: 'bpm',
+          finger_detected: true,
+          device_id: deviceName || 'ESP32_BLE',
+          timestamp
+        });
+      }
+
+      if (avgSpo2 > 0) {
+        avgMetrics.push({
+          patient_id: currentUser.patientId,
+          metric_type: 'spo2_avg',
+          value: avgSpo2,
+          unit: '%',
+          finger_detected: true,
+          device_id: deviceName || 'ESP32_BLE',
+          timestamp
+        });
+      }
+
+      if (avgTemperature > 0) {
+        avgMetrics.push({
+          patient_id: currentUser.patientId,
+          metric_type: 'temperature_avg',
+          value: avgTemperature,
+          unit: '°C',
+          finger_detected: true,
+          device_id: deviceName || 'ESP32_BLE',
+          timestamp
+        });
+      }
+
+      if (avgActivity > 0) {
+        avgMetrics.push({
+          patient_id: currentUser.patientId,
+          metric_type: 'activity_avg',
+          value: Math.round(avgActivity * 100) / 100,
+          unit: 'g',
+          finger_detected: true,
+          device_id: deviceName || 'ESP32_BLE',
+          timestamp
+        });
+      }
+
+      // Save all averages
+      if (avgMetrics.length > 0) {
+        Promise.all(avgMetrics.map(metric => addMetric(metric)))
+          .then(() => console.log('✅ Averages saved'))
+          .catch(err => console.error('❌ Error saving averages:', err));
+      }
+
+      // Clear buffer after processing
+      return {
+        heartRate: [],
+        spo2: [],
+        temperature: [],
+        activity: [],
+        timestamps: []
+      };
+    });
+  }, [currentUser, deviceName]);
+
+  // Add data to buffer and check if 2 minutes have passed
+  const addToBuffer = useCallback((
+    type: 'heartRate' | 'spo2' | 'temperature' | 'activity',
+    value: number
+  ) => {
+    if (value <= 0 || isNaN(value)) return;
+
+    setDataBuffer(prev => {
+      const now = new Date();
+      const updated = { ...prev };
+
+      // Add data to appropriate array
+      updated[type] = [...prev[type], value];
+      updated.timestamps = [...prev.timestamps, now];
+
+      // Check if we have 2 minutes of data
+      if (updated.timestamps.length > 0) {
+        const firstTimestamp = updated.timestamps[0];
+        const timeDiff = (now.getTime() - firstTimestamp.getTime()) / 1000; // in seconds
+
+        if (timeDiff >= 120) { // 2 minutes = 120 seconds
+          setTimeout(() => processAndSaveAverageData(), 0);
+        }
+      }
+
+      // Limit buffer size to prevent memory issues
+      if (updated[type].length > 300) { // 5 minutes worth
+        updated[type] = updated[type].slice(-240);
+        updated.timestamps = updated.timestamps.slice(-240);
+      }
+
+      return updated;
+    });
+  }, [processAndSaveAverageData]);
+
+  // Simple function to check and show immediate alerts (no persistence)
+  const checkAndShowAlert = (
+    value: number,
+    metricType: string,
+    thresholdCheck: (val: number) => boolean,
+    alertMessage: string,
+    setAlertState: React.Dispatch<React.SetStateAction<SimpleAlertState>>
+  ) => {
+    const isAbnormal = thresholdCheck(value);
+
+    if (isAbnormal) {
+      setAlertState({
+        isActive: true,
+        message: alertMessage
+      });
+
+      // Auto-hide alert after 5 seconds
+      setTimeout(() => {
+        if (isMounted.current) {
+          setAlertState({
+            isActive: false,
+            message: ''
+          });
+        }
+      }, 5000);
+    }
+  };
+
+  // Specific threshold check functions
+  const isHeartRateAbnormal = (value: number) => value < 50 || value > 120;
+  const isSpo2Abnormal = (value: number) => value < 95;
+  const isTemperatureAbnormal = (value: number) => value < 36 || value > 38;
+
+  // Update state from BLE data and save to DB
   function updateHealthData(data: ESP32SensorData) {
     if (!isMounted.current) return;
 
@@ -248,87 +778,179 @@ const safeSetState = <T,>(
       ? Number(data.bodyTemperature)
       : NaN;
 
+    // Determine if finger is present
+    const fingerPresent = isFingerPresent(data, hr, spo2);
+
     // ========== ACCELERATION DATA ==========
+    let activityIntensity = 0;
+    let activityStatus = "Inactive";
+
     if (data.acceleration) {
       console.log("ACCELERATION DATA RECEIVED:", data.acceleration);
       safeSetState(setAccelerationData, data.acceleration);
 
       const { x, y, z } = data.acceleration;
-      const intensity = Math.sqrt(x * x + y * y + z * z);
+      activityIntensity = Math.sqrt(x * x + y * y + z * z);
 
       // Process acceleration for motion detection
-      processAcceleration(intensity, x, y, z);
+      processAcceleration(activityIntensity, x, y, z);
 
-      // Update physical activity display
-      let status = "Inactive";
-      if (intensity > 2.0) status = "Running";
-      else if (intensity > 1.2) status = "Walking";
-      else if (intensity > 0.1) status = "Light Activity";
-      else status = "Inactive";
+      // Determine activity status
+      if (activityIntensity > 2.0) activityStatus = "Running";
+      else if (activityIntensity > 1.2) activityStatus = "Walking";
+      else if (activityIntensity > 0.1) activityStatus = "Light Activity";
+      else activityStatus = "Inactive";
 
+      // Add to buffer for 2-minute aggregation
+      addToBuffer('activity', activityIntensity);
+
+      // Update UI
       safeSetState(setRealTimeData, (prev) => {
         if (!isMounted.current) return prev;
         return {
           ...prev,
           "Physical Activity": {
             ...prev["Physical Activity"],
-            current: status,
-            pastWeek: pushToPastWeek(prev["Physical Activity"].pastWeek, intensity),
+            current: activityStatus,
+            pastWeek: pushToPastWeek(prev["Physical Activity"].pastWeek, activityIntensity),
           }
         };
       });
     }
 
+    let shouldUpdateGauges = false;
+
     safeSetState(setRealTimeData, (prev) => {
       if (!isMounted.current) return prev;
 
       const updated = { ...prev };
-      const fingerPresent = data.fingerDetected === undefined ? true : Boolean(data.fingerDetected);
 
       // Heart Rate
-      if (fingerPresent && !Number.isNaN(hr) && hr > 0) {
-        updated["heartRate"] = {
-          ...prev["heartRate"],
-          current: `${hr} bpm`,
-          pastWeek: pushToPastWeek(prev["heartRate"].pastWeek, hr),
-        };
+      if (!Number.isNaN(hr) && hr > 0) {
+        const newValue = `${hr} bpm`;
+        if (updated["heartRate"].current !== newValue) {
+          updated["heartRate"] = {
+            ...prev["heartRate"],
+            current: newValue,
+            pastWeek: pushToPastWeek(prev["heartRate"].pastWeek, hr),
+          };
+          shouldUpdateGauges = true;
+
+          // Add to buffer for 2-minute aggregation
+          addToBuffer('heartRate', hr);
+
+          // Check and show immediate alert if needed
+          if (fingerPresent) {
+            checkAndShowAlert(
+              hr,
+              'heart_rate',
+              isHeartRateAbnormal,
+              `⚠️ Abnormal heart rate: ${hr} bpm`,
+              setHeartRateAlert
+            );
+          }
+        }
       } else {
-        updated["heartRate"] = {
-          ...prev["heartRate"],
-          current: fingerPresent ? "0 bpm" : "-- bpm",
-        };
+        const newValue = fingerPresent ? "0 bpm" : "-- bpm";
+        if (updated["heartRate"].current !== newValue) {
+          updated["heartRate"] = {
+            ...prev["heartRate"],
+            current: newValue,
+          };
+          shouldUpdateGauges = true;
+        }
       }
 
       // Blood Oxygen
-      if (fingerPresent && !Number.isNaN(spo2) && spo2 > 0) {
-        updated["Blood Oxygen"] = {
-          ...prev["Blood Oxygen"],
-          current: `${spo2}%`,
-          pastWeek: pushToPastWeek(prev["Blood Oxygen"].pastWeek, spo2),
-        };
+      if (!Number.isNaN(spo2) && spo2 > 0) {
+        const newValue = `${spo2}%`;
+        if (updated["Blood Oxygen"].current !== newValue) {
+          updated["Blood Oxygen"] = {
+            ...prev["Blood Oxygen"],
+            current: newValue,
+            pastWeek: pushToPastWeek(prev["Blood Oxygen"].pastWeek, spo2),
+          };
+          shouldUpdateGauges = true;
+
+          // Add to buffer for 2-minute aggregation
+          addToBuffer('spo2', spo2);
+
+          // Check and show immediate alert if needed
+          if (fingerPresent) {
+            checkAndShowAlert(
+              spo2,
+              'spo2',
+              isSpo2Abnormal,
+              `⚠️ Low SpO2: ${spo2}%`,
+              setSpo2Alert
+            );
+          }
+        }
       } else {
-        updated["Blood Oxygen"] = {
-          ...prev["Blood Oxygen"],
-          current: fingerPresent ? "0%" : "--%",
-        };
+        const newValue = fingerPresent ? "0%" : "--%";
+        if (updated["Blood Oxygen"].current !== newValue) {
+          updated["Blood Oxygen"] = {
+            ...prev["Blood Oxygen"],
+            current: newValue,
+          };
+          shouldUpdateGauges = true;
+        }
       }
 
       // Body Temperature
       if (!Number.isNaN(bt) && bt > 0) {
-        updated["Body Temperature"] = {
-          ...prev["Body Temperature"],
-          current: `${bt.toFixed(1)}°C`,
-          pastWeek: pushToPastWeek(prev["Body Temperature"].pastWeek, bt),
-        };
+        const newValue = `${bt.toFixed(1)}°C`;
+        if (updated["Body Temperature"].current !== newValue) {
+          updated["Body Temperature"] = {
+            ...prev["Body Temperature"],
+            current: newValue,
+            pastWeek: pushToPastWeek(prev["Body Temperature"].pastWeek, bt),
+          };
+          shouldUpdateGauges = true;
+
+          // Add to buffer for 2-minute aggregation
+          addToBuffer('temperature', bt);
+
+          // Check and show immediate alert if needed
+          checkAndShowAlert(
+            bt,
+            'temperature',
+            isTemperatureAbnormal,
+            `⚠️ Abnormal temperature: ${bt.toFixed(1)}°C`,
+            setTemperatureAlert
+          );
+        }
       } else {
-        updated["Body Temperature"] = {
-          ...prev["Body Temperature"],
-          current: "--°C",
-        };
+        const newValue = "--°C";
+        if (updated["Body Temperature"].current !== newValue) {
+          updated["Body Temperature"] = {
+            ...prev["Body Temperature"],
+            current: newValue,
+          };
+          shouldUpdateGauges = true;
+        }
+      }
+
+      if (shouldUpdateGauges) {
+        setTimeout(() => forceGaugeUpdate(), 0);
       }
 
       return updated;
     });
+
+    // Save ALL metrics to database at once whenever we have heart rate data
+    if (!Number.isNaN(hr) && hr > 0) {
+      saveAllMetricsToDB(
+        hr,
+        spo2,
+        bt,
+        activityIntensity,
+        activityStatus,
+        fingerPresent,
+        motionState.steps,
+        motionState.calories
+      );
+    }
   }
 
   // Motion processing
@@ -360,13 +982,44 @@ const safeSetState = <T,>(
         updated.fallDetected = true;
         console.log("⚠️ FALL DETECTED!");
 
+        // Save fall event to database immediately
+        if (currentUser?.patientId) {
+          addMetric({
+            patient_id: currentUser.patientId,
+            metric_type: 'fall_detected',
+            value: 1,
+            unit: 'event',
+            finger_detected: true,
+            device_id: deviceName || 'ESP32_BLE',
+            timestamp: new Date().toISOString()
+          }).catch(err => console.error('Error saving fall:', err));
+        }
+
         Alert.alert(
           '⚠️ FALL DETECTED',
           'A fall has been detected. Are you okay?',
           [
             { text: "I'm OK", onPress: () => console.log('User OK') },
-            { text: 'Emergency', onPress: () => console.log('Emergency triggered'), style: 'destructive' }
-          ]
+            {
+              text: 'Emergency',
+              onPress: () => {
+                console.log('Emergency triggered');
+                if (currentUser?.patientId) {
+                  addMetric({
+                    patient_id: currentUser.patientId,
+                    metric_type: 'emergency_alert',
+                    value: 1,
+                    unit: 'event',
+                    finger_detected: true,
+                    device_id: deviceName || 'ESP32_BLE',
+                    timestamp: new Date().toISOString()
+                  }).catch(err => console.error('Error saving emergency:', err));
+                }
+              },
+              style: 'destructive'
+            }
+          ],
+          { cancelable: false }
         );
 
         setTimeout(() => {
@@ -388,6 +1041,17 @@ const safeSetState = <T,>(
 
         if (updated.tremorDetected && !prev.tremorDetected) {
           console.log("⚠️ TREMOR DETECTED!");
+          if (currentUser?.patientId) {
+            addMetric({
+              patient_id: currentUser.patientId,
+              metric_type: 'tremor_detected',
+              value: 1,
+              unit: 'event',
+              finger_detected: true,
+              device_id: deviceName || 'ESP32_BLE',
+              timestamp: new Date().toISOString()
+            }).catch(err => console.error('Error saving tremor:', err));
+          }
         }
       }
 
@@ -438,65 +1102,79 @@ const safeSetState = <T,>(
     }
   };
 
-// FINAL CLEAN DISCONNECT HANDLER
-const handleDisconnect = async () => {
-  if (isDisconnecting) {
-    console.log('Disconnect already in progress');
-    return;
-  }
+  // FINAL CLEAN DISCONNECT HANDLER
+  const handleDisconnect = async () => {
+    if (isDisconnecting) {
+      console.log('Disconnect already in progress');
+      return;
+    }
 
-  console.log('=== SAFE DISCONNECT STARTED ===');
-
-  if (isMounted.current) {
-    setIsDisconnecting(true);
-  }
-
-  try {
-    // Step 1: Clear all UI data first
-    console.log('Step 1: Clearing UI data...');
+    console.log('=== SAFE DISCONNECT STARTED ===');
 
     if (isMounted.current) {
-      setAccelerationData(null);
-      setRealTimeData({
-        "heartRate": { current: "-- bpm", pastWeek: [], anomalyCheck: (d) => d.some((v) => v < 60 || v > 100) },
-        "Blood Oxygen": { current: "--%", pastWeek: [], anomalyCheck: (d) => d.some((v) => v < 95) },
-        "Body Temperature": { current: "--°C", pastWeek: [], anomalyCheck: (d) => d.some((v) => v < 36 || v > 38) },
-        "Physical Activity": { current: "Inactive", pastWeek: [], anomalyCheck: (d) => d.some((v) => v < 20) },
-      });
-      setMotionState({
-        motionIntensity: [],
-        steps: 0,
-        lastPeakTime: 0,
-        fallDetected: false,
-        tremorDetected: false,
-        calories: 0
-      });
+      setIsDisconnecting(true);
     }
 
-    // Step 2: Small delay for UI to update
-    await new Promise(resolve => setTimeout(resolve, 50));
-
-    // Step 3: Disconnect BLE device
-    console.log('Step 2: Disconnecting BLE...');
     try {
-      await hookDisconnect();
-      console.log('BLE disconnected successfully');
-    } catch (hookError) {
-      console.error('BLE disconnect error (ignored):', hookError);
-    }
+      // Step 1: Clear all UI data first
+      console.log('Step 1: Clearing UI data...');
 
-  } catch (error) {
-    console.error('Unexpected error during disconnect:', error);
-  } finally {
-    // Step 4: Reset disconnecting state
-    setTimeout(() => {
       if (isMounted.current) {
-        setIsDisconnecting(false);
-        console.log('=== DISCONNECT COMPLETE ===');
+        setAccelerationData(null);
+        setRealTimeData({
+          "heartRate": { current: "-- bpm", pastWeek: [], anomalyCheck: (d) => d.some((v) => v < 60 || v > 100), unit: "bpm", metric_type: "heart_rate", timestamps: [] },
+          "Blood Oxygen": { current: "--%", pastWeek: [], anomalyCheck: (d) => d.some((v) => v < 95), unit: "%", metric_type: "spo2", timestamps: [] },
+          "Body Temperature": { current: "--°C", pastWeek: [], anomalyCheck: (d) => d.some((v) => v < 36 || v > 38), unit: "°C", metric_type: "temperature", timestamps: [] },
+          "Physical Activity": { current: "Inactive", pastWeek: [], anomalyCheck: (d) => d.some((v) => v < 20), unit: "g", metric_type: "activity", timestamps: [] },
+        });
+        setMotionState({
+          motionIntensity: [],
+          steps: 0,
+          lastPeakTime: 0,
+          fallDetected: false,
+          tremorDetected: false,
+          calories: 0
+        });
+        setDataBuffer({
+          heartRate: [],
+          spo2: [],
+          temperature: [],
+          activity: [],
+          timestamps: []
+        });
+
+        // Reset all alert states
+        setHeartRateAlert({ isActive: false, message: '' });
+        setSpo2Alert({ isActive: false, message: '' });
+        setTemperatureAlert({ isActive: false, message: '' });
+
+        forceGaugeUpdate();
       }
-    }, 500);
-  }
-};
+
+      // Step 2: Small delay for UI to update
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      // Step 3: Disconnect BLE device
+      console.log('Step 2: Disconnecting BLE...');
+      try {
+        await hookDisconnect();
+        console.log('BLE disconnected successfully');
+      } catch (hookError) {
+        console.error('BLE disconnect error (ignored):', hookError);
+      }
+
+    } catch (error) {
+      console.error('Unexpected error during disconnect:', error);
+    } finally {
+      // Step 4: Reset disconnecting state
+      setTimeout(() => {
+        if (isMounted.current) {
+          setIsDisconnecting(false);
+          console.log('=== DISCONNECT COMPLETE ===');
+        }
+      }, 500);
+    }
+  };
 
   // Use callback for disconnect to prevent recreation
   const confirmDisconnect = useCallback(() => {
@@ -521,9 +1199,48 @@ const handleDisconnect = async () => {
     );
   }, []);
 
+  // Refresh data from database
+  const refreshData = useCallback(() => {
+    if (currentUser?.patientId) {
+      loadHistoricalData();
+    }
+  }, [currentUser]);
+
+  if (loadingUser) {
+    return (
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+        <ActivityIndicator size="large" color="#76c7c0" />
+        <Text style={{ color: '#FFF', marginTop: 10 }}>Loading user data...</Text>
+      </View>
+    );
+  }
+
+  if (!currentUser) {
+    return (
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+        <Text style={{ color: '#FFF', fontSize: 18, marginBottom: 20 }}>No user logged in</Text>
+        <TouchableOpacity
+          style={connectionStyles.connectButton}
+          onPress={() => navigation.navigate('Login' as never)}
+        >
+          <Text style={connectionStyles.connectText}>Go to Login</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
       <Text style={styles.title}>Health Data Monitoring</Text>
+
+      {/* User Info Bar */}
+      <View style={userStyles.container}>
+        <Text style={userStyles.name}>{currentUser.fullname || currentUser.username}</Text>
+        <Text style={userStyles.role}>{currentUser.role}</Text>
+        <TouchableOpacity onPress={refreshData} style={userStyles.refreshButton}>
+          <Text style={userStyles.refreshText}>↻</Text>
+        </TouchableOpacity>
+      </View>
 
       {/* Wrap everything in ScrollView */}
       <ScrollView
@@ -544,11 +1261,43 @@ const handleDisconnect = async () => {
                 ? `BLE: Connected to ${deviceName ?? "ESP32"}`
                 : "BLE Disconnected"}
             </Text>
+            {loadingHistory && (
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 2 }}>
+                <ActivityIndicator size="small" color="#76c7c0" />
+                <Text style={{ color: '#76c7c0', fontSize: 12, marginLeft: 5 }}>
+                  Loading history...
+                </Text>
+              </View>
+            )}
             {isDisconnecting && (
               <Text style={connectionStyles.disconnectingText}>Disconnecting...</Text>
             )}
             {disconnectError && (
               <Text style={connectionStyles.errorText}>Error: {disconnectError}</Text>
+            )}
+
+            {/* Simple alert indicators (auto-hide after 5 seconds) */}
+            {heartRateAlert.isActive && (
+              <Text style={{ color: '#e53935', fontSize: 11, marginTop: 2 }}>
+                {heartRateAlert.message}
+              </Text>
+            )}
+            {spo2Alert.isActive && (
+              <Text style={{ color: '#e53935', fontSize: 11, marginTop: 2 }}>
+                {spo2Alert.message}
+              </Text>
+            )}
+            {temperatureAlert.isActive && (
+              <Text style={{ color: '#e53935', fontSize: 11, marginTop: 2 }}>
+                {temperatureAlert.message}
+              </Text>
+            )}
+
+            {/* Buffer status indicator */}
+            {dataBuffer.timestamps.length > 0 && (
+              <Text style={{ color: '#76c7c0', fontSize: 10, marginTop: 2 }}>
+                📊 Buffer: {Math.round((new Date().getTime() - dataBuffer.timestamps[0]?.getTime()) / 1000)}s / 120s
+              </Text>
             )}
           </View>
           {!connected ? (
@@ -574,9 +1323,10 @@ const handleDisconnect = async () => {
           )}
         </View>
 
-        {/* Dashboard Gauges */}
+        {/* Dashboard Gauges - Fixed with keys that change on update */}
         <View style={gaugeStyles.row}>
           <GaugeCard
+            key={`heart-${heartRateValue}-${updateCounter}`}
             title="Heart Rate"
             value={heartRateValue}
             unit=" bpm"
@@ -585,6 +1335,7 @@ const handleDisconnect = async () => {
             isEmpty={isHeartRateEmpty}
           />
           <GaugeCard
+            key={`spo2-${spo2Value}-${updateCounter}`}
             title="SpO₂"
             value={spo2Value}
             unit="%"
@@ -593,6 +1344,7 @@ const handleDisconnect = async () => {
             isEmpty={isSpO2Empty}
           />
           <GaugeCard
+            key={`temp-${tempValue}-${updateCounter}`}
             title="Temperature"
             value={tempValue}
             unit="°C"
@@ -810,7 +1562,7 @@ const handleDisconnect = async () => {
   );
 };
 
-// Updated Styles
+// Styles (keeping all your existing styles)
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -836,6 +1588,45 @@ const styles = StyleSheet.create({
   },
   cardContainer: {
     // No need for paddingBottom here as we have it in scrollContent
+  },
+});
+
+const userStyles = StyleSheet.create({
+  container: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(118, 199, 192, 0.1)',
+    padding: 10,
+    borderRadius: 8,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: '#76c7c0',
+  },
+  name: {
+    color: '#FFF',
+    fontSize: 16,
+    fontWeight: 'bold',
+    flex: 1,
+  },
+  role: {
+    color: '#76c7c0',
+    fontSize: 14,
+    marginRight: 10,
+    textTransform: 'capitalize',
+  },
+  refreshButton: {
+    padding: 5,
+    backgroundColor: '#76c7c0',
+    borderRadius: 15,
+    width: 30,
+    height: 30,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  refreshText: {
+    color: '#1A1F3E',
+    fontSize: 18,
+    fontWeight: 'bold',
   },
 });
 

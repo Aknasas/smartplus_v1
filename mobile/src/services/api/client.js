@@ -7,19 +7,18 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 const getBaseURL = () => {
   // For production
   if (!__DEV__) {
-    return 'http://192.168.8.101:4100'; // Your production IP
+    return 'http://192.168.8.103:4100';
   }
 
   // For development - handle different platforms
   if (Platform.OS === 'android') {
-    // For Android emulator, use 10.0.2.2 for localhost
-    // For physical device, use your machine's IP
-    return 'http://192.168.8.101:4100'; // Change to your actual IP
+
+    return 'http://192.168.8.103:4100';
   } else if (Platform.OS === 'ios') {
-    // iOS simulator uses localhost
+
     return 'http://localhost:4100';
   } else {
-    // For web or other platforms
+
     return 'http://localhost:4100';
   }
 };

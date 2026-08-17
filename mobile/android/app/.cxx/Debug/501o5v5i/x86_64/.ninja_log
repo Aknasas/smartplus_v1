@@ -1,10 +1,10 @@
 # ninja log v5
 29601	41689	7946794504065708	BlePlx_autolinked_build/CMakeFiles/react_codegen_BlePlx.dir/react/renderer/components/BlePlx/Props.cpp.o	b0ce75099292f21b
 68	8728	7946794174655844	rnasyncstorage_autolinked_build/CMakeFiles/react_codegen_rnasyncstorage.dir/react/renderer/components/rnasyncstorage/States.cpp.o	2d7c7b0bdcc94522
-1	32	0	E:/smartplus_v1/mobile/android/app/.cxx/Debug/501o5v5i/x86_64/CMakeFiles/cmake.verify_globs	3069fc994e25462d
+2	44	0	E:/smartplus_v1/mobile/android/app/.cxx/Debug/501o5v5i/x86_64/CMakeFiles/cmake.verify_globs	3069fc994e25462d
 13251	31676	7946794403212672	lottiereactnative_autolinked_build/CMakeFiles/react_codegen_lottiereactnative.dir/react/renderer/components/lottiereactnative/Props.cpp.o	ba22aa5821d3aba6
 12780	23731	7946794324253732	lottiereactnative_autolinked_build/CMakeFiles/react_codegen_lottiereactnative.dir/lottiereactnative-generated.cpp.o	a7d21c6cb3cec8a6
-28	14473	7946794231506734	CMakeFiles/appmodules.dir/OnLoad.cpp.o	e53e910dfb2d5332
+36	15242	7956330513473966	CMakeFiles/appmodules.dir/OnLoad.cpp.o	c9979b86ebfc3d86
 41721	59094	7946794678096107	rngesturehandler_codegen_autolinked_build/CMakeFiles/react_codegen_rngesturehandler_codegen.dir/react/renderer/components/rngesturehandler_codegen/ComponentDescriptors.cpp.o	c5d48aa236916728
 51	9594	7946794183236998	rnasyncstorage_autolinked_build/CMakeFiles/react_codegen_rnasyncstorage.dir/react/renderer/components/rnasyncstorage/EventEmitters.cpp.o	6929da25b05503fc
 122711	135531	7946795442722370	rnscreens_autolinked_build/CMakeFiles/react_codegen_rnscreens.dir/a547424e43f93d34d76a5cade68881f0/common/cpp/react/renderer/components/rnscreens/RNSScreenStackHeaderConfigState.cpp.o	1675a3c6238b3680
@@ -12,7 +12,7 @@
 34	11607	7946794203794738	rnasyncstorage_autolinked_build/CMakeFiles/react_codegen_rnasyncstorage.dir/react/renderer/components/rnasyncstorage/Props.cpp.o	17f3fda9e6ceabf5
 9595	21334	7946794300793543	rnasyncstorage_autolinked_build/CMakeFiles/react_codegen_rnasyncstorage.dir/rnasyncstorage-generated.cpp.o	99bb7392a29067e7
 8729	20402	7946794291291615	rnasyncstorage_autolinked_build/CMakeFiles/react_codegen_rnasyncstorage.dir/react/renderer/components/rnasyncstorage/rnasyncstorageJSI-generated.cpp.o	d561bbfeb1d9f516
-136038	193114	7946796015801616	CMakeFiles/appmodules.dir/E_/smartplus_v1/mobile/android/app/build/generated/autolinking/src/main/jni/autolinking.cpp.o	e1c3da9a341a1b73
+29	33178	7956330692841666	CMakeFiles/appmodules.dir/E_/smartplus_v1/mobile/android/app/build/generated/autolinking/src/main/jni/autolinking.cpp.o	6bfce43c6b42e81f
 60	12779	7946794215004201	rnasyncstorage_autolinked_build/CMakeFiles/react_codegen_rnasyncstorage.dir/react/renderer/components/rnasyncstorage/ShadowNodes.cpp.o	a6832c98676022e8
 85161	96080	7946795047932316	safeareacontext_autolinked_build/CMakeFiles/react_codegen_safeareacontext.dir/abe6caea52edc83de87da938e8113cda/codegen/jni/react/renderer/components/safeareacontext/EventEmitters.cpp.o	69f76e4c51d37478
 11608	29644	7946794383305909	lottiereactnative_autolinked_build/CMakeFiles/react_codegen_lottiereactnative.dir/react/renderer/components/lottiereactnative/ComponentDescriptors.cpp.o	cf656ea5564e17c7
@@ -23,6 +23,7 @@
 23732	34552	7946794433174006	lottiereactnative_autolinked_build/CMakeFiles/react_codegen_lottiereactnative.dir/react/renderer/components/lottiereactnative/lottiereactnativeJSI-generated.cpp.o	8dae982f75ffe350
 45141	54025	7946794627636984	rngesturehandler_codegen_autolinked_build/CMakeFiles/react_codegen_rngesturehandler_codegen.dir/react/renderer/components/rngesturehandler_codegen/States.cpp.o	5a7e5df4a5b9c579
 21335	30296	7946794389351592	lottiereactnative_autolinked_build/CMakeFiles/react_codegen_lottiereactnative.dir/react/renderer/components/lottiereactnative/States.cpp.o	be782ba757f35ae6
+54	14103	7956330502838019	RNCNetInfoSpec_autolinked_build/CMakeFiles/react_codegen_RNCNetInfoSpec.dir/react/renderer/components/RNCNetInfoSpec/ComponentDescriptors.cpp.o	12a6d0f14fee4fd
 105020	126288	7946795349791840	rnscreens_autolinked_build/CMakeFiles/react_codegen_rnscreens.dir/a547424e43f93d34d76a5cade68881f0/common/cpp/react/renderer/components/rnscreens/RNSScreenShadowNodeCommitHook.cpp.o	7786b76ab98f9690
 29645	40157	7946794489191639	BlePlx_autolinked_build/CMakeFiles/react_codegen_BlePlx.dir/react/renderer/components/BlePlx/BlePlxJSI-generated.cpp.o	335e331f1ca0d0ac
 34553	43644	7946794524089458	BlePlx_autolinked_build/CMakeFiles/react_codegen_BlePlx.dir/react/renderer/components/BlePlx/States.cpp.o	323f6e0d0da9b666
@@ -96,6 +97,12 @@
 213373	221060	7946796298429912	rnworklets_autolinked_build/CMakeFiles/react_codegen_rnworklets.dir/react/renderer/components/rnworklets/States.cpp.o	92e7a843372f6534
 215409	224327	7946796331189151	rnworklets_autolinked_build/CMakeFiles/react_codegen_rnworklets.dir/react/renderer/components/rnworklets/rnworkletsJSI-generated.cpp.o	14f0280dec997009
 201799	213372	7946796220918412	rnworklets_autolinked_build/CMakeFiles/react_codegen_rnworklets.dir/rnworklets-generated.cpp.o	4d4f06dc2bf977bd
-224413	224947	7946796336805609	E:/smartplus_v1/mobile/android/app/build/intermediates/cxx/Debug/501o5v5i/obj/x86_64/libappmodules.so	a847c76ef0cf74b7
+33179	39466	7956330743181307	E:/smartplus_v1/mobile/android/app/build/intermediates/cxx/Debug/501o5v5i/obj/x86_64/libappmodules.so	4bafd683b737fd63
 0	93	0	clean	d0ed652a55d7c727
-2	44	0	E:/smartplus_v1/mobile/android/app/.cxx/Debug/501o5v5i/x86_64/CMakeFiles/cmake.verify_globs	3069fc994e25462d
+63	10260	7956330464578734	RNCNetInfoSpec_autolinked_build/CMakeFiles/react_codegen_RNCNetInfoSpec.dir/react/renderer/components/RNCNetInfoSpec/EventEmitters.cpp.o	6bb1986227765e15
+45	12169	7956330483106848	RNCNetInfoSpec_autolinked_build/CMakeFiles/react_codegen_RNCNetInfoSpec.dir/RNCNetInfoSpec-generated.cpp.o	677ad2673250521f
+73	13417	7956330496020023	RNCNetInfoSpec_autolinked_build/CMakeFiles/react_codegen_RNCNetInfoSpec.dir/react/renderer/components/RNCNetInfoSpec/ShadowNodes.cpp.o	3341b30ecdf32872
+12170	19435	7956330556536742	RNCNetInfoSpec_autolinked_build/CMakeFiles/react_codegen_RNCNetInfoSpec.dir/react/renderer/components/RNCNetInfoSpec/States.cpp.o	2b544f905e13bb94
+10261	20570	7956330568139697	RNCNetInfoSpec_autolinked_build/CMakeFiles/react_codegen_RNCNetInfoSpec.dir/react/renderer/components/RNCNetInfoSpec/Props.cpp.o	ed9a54a83a6a8fbf
+13418	21717	7956330579545199	RNCNetInfoSpec_autolinked_build/CMakeFiles/react_codegen_RNCNetInfoSpec.dir/react/renderer/components/RNCNetInfoSpec/RNCNetInfoSpecJSI-generated.cpp.o	9d1fa551de9ddbd3
+2	39	0	E:/smartplus_v1/mobile/android/app/.cxx/Debug/501o5v5i/x86_64/CMakeFiles/cmake.verify_globs	3069fc994e25462d

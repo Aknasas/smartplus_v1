@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "890711130865",
+    "project_id": "smartplus-v1",
+    "storage_bucket": "smartplus-v1.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:890711130865:android:87087d80ced57008789f50",
+        "android_client_info": {
+          "package_name": "com.mobile"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDbN5Eg70Z5CQsbc__JoVayAvbl9rml0Ek"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

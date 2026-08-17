@@ -1,6 +1,7 @@
 {
   "buildFiles": [
     "E:\\smartplus_v1\\mobile\\node_modules\\@react-native-async-storage\\async-storage\\android\\build\\generated\\source\\codegen\\jni\\CMakeLists.txt",
+    "E:\\smartplus_v1\\mobile\\node_modules\\@react-native-community\\netinfo\\android\\build\\generated\\source\\codegen\\jni\\CMakeLists.txt",
     "E:\\smartplus_v1\\mobile\\node_modules\\lottie-react-native\\android\\build\\generated\\source\\codegen\\jni\\CMakeLists.txt",
     "E:\\smartplus_v1\\mobile\\node_modules\\react-native-ble-plx\\android\\build\\generated\\source\\codegen\\jni\\CMakeLists.txt",
     "E:\\smartplus_v1\\mobile\\node_modules\\react-native-gesture-handler\\android\\build\\generated\\source\\codegen\\jni\\CMakeLists.txt",
@@ -94,6 +95,11 @@
         "C:\\Users\\user\\.gradle\\caches\\9.0.0\\transforms\\1e84847373c8b60ddb3f088099977c2a\\transformed\\react-android-0.82.1-debug\\prefab\\modules\\jsi\\libs\\android.x86_64\\libjsi.so",
         "C:\\Users\\user\\.gradle\\caches\\9.0.0\\transforms\\5fa135f9220cf0ae1e3ee40cd371125b\\transformed\\fbjni-0.7.0\\prefab\\modules\\fbjni\\libs\\android.x86_64\\libfbjni.so"
       ]
+    },
+    "react_codegen_RNCNetInfoSpec::@c36c96bfd5b5770618a5": {
+      "artifactName": "react_codegen_RNCNetInfoSpec",
+      "abi": "x86_64",
+      "runtimeFiles": []
     },
     "react_codegen_rnworklets::@68f58d84d4754f193387": {
       "artifactName": "react_codegen_rnworklets",

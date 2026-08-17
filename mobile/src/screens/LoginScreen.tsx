@@ -472,7 +472,7 @@ export default function LoginScreen({ navigation }) {
           )}
 
           <Text style={styles.loginTitle}>
-            {isLoginMode ? "eHDS Login" : "Create Account"}
+            {isLoginMode ? "SmartHealth+ Login" : "Create Account"}
           </Text>
 
           {/* Debug info - remove in production */}

@@ -1,6 +1,7 @@
 {
   "buildFiles": [
     "E:\\smartplus_v1\\mobile\\node_modules\\@react-native-async-storage\\async-storage\\android\\build\\generated\\source\\codegen\\jni\\CMakeLists.txt",
+    "E:\\smartplus_v1\\mobile\\node_modules\\@react-native-community\\netinfo\\android\\build\\generated\\source\\codegen\\jni\\CMakeLists.txt",
     "E:\\smartplus_v1\\mobile\\node_modules\\lottie-react-native\\android\\build\\generated\\source\\codegen\\jni\\CMakeLists.txt",
     "E:\\smartplus_v1\\mobile\\node_modules\\react-native-ble-plx\\android\\build\\generated\\source\\codegen\\jni\\CMakeLists.txt",
     "E:\\smartplus_v1\\mobile\\node_modules\\react-native-gesture-handler\\android\\build\\generated\\source\\codegen\\jni\\CMakeLists.txt",
@@ -45,6 +46,11 @@
       "toolchain": "toolchain",
       "abi": "x86",
       "artifactName": "react_codegen_BlePlx"
+    },
+    "react_codegen_RNCNetInfoSpec::@c36c96bfd5b5770618a5": {
+      "toolchain": "toolchain",
+      "abi": "x86",
+      "artifactName": "react_codegen_RNCNetInfoSpec"
     },
     "react_codegen_RNVectorIconsSpec::@479809fae146501fd34d": {
       "toolchain": "toolchain",

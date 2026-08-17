@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   View,
   Text,
@@ -8,360 +8,669 @@ import {
   TextInput,
   StyleSheet,
   Dimensions,
+  Alert,
+  Switch,
+  ActivityIndicator,
+  RefreshControl,
+  Platform,
+  PermissionsAndroid,
 } from "react-native";
 import ReminderCard from "../components/ReminderCard";
 import FontAwesome from "react-native-vector-icons/FontAwesome";
+import DateTimePicker from '@react-native-community/datetimepicker';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import {
+  getReminders,
+  createReminder,
+  updateReminder,
+  deleteReminder,
+  completeReminder,
+} from '../services/api/reminders';
+import AlarmService from '../services/AlarmService';
 
 const { width } = Dimensions.get('window');
 
-const initialReminders = [
-  {
-    id: '1',
-    type: 'Medicine Intake',
-    title: 'Take Blood Pressure Medicine',
-    description: 'Take after breakfast',
-    dateTime: new Date('2024-11-10T08:00:00'),
-    extraInfo: 'Lisinopril, 10mg',
-    color: '#42A5F5',
-  },
-  {
-    id: '2',
-    type: 'Doctor Appointment',
-    title: 'Next Doctor Appointment',
-    description: 'Regular check-up',
-    dateTime: new Date('2024-11-15T10:00:00'),
-    extraInfo: 'Dr. Smith at Health Clinic, Room 101',
-    color: '#66BB6A',
-  },
-  {
-    id: '3',
-    type: 'Lab Test',
-    title: 'Blood Sugar Test',
-    description: 'Fasting required',
-    dateTime: new Date('2024-11-20T09:00:00'),
-    extraInfo: 'City Lab',
-    color: '#FFA726',
-  },
-  {
-    id: '4',
-    type: 'Exercise',
-    title: 'Morning Walk',
-    description: '30 minutes brisk walking',
-    dateTime: new Date('2024-11-09T07:00:00'),
-    extraInfo: 'Park near home',
-    color: '#AB47BC',
-  },
-  {
-    id: '5',
-    type: 'Medication Refill',
-    title: 'Refill Prescription',
-    description: 'Pick up from pharmacy',
-    dateTime: new Date('2024-11-25T16:00:00'),
-    extraInfo: 'CVS Pharmacy',
-    color: '#EF5350',
-  },
-];
+// Complete color palette for all reminder types
+const typeColors = {
+  // Medical Appointments
+  'Doctor Consultation': '#42A5F5',
+  'Doctor Appointment': '#2196F3',
+  'Specialist Visit': '#1E88E5',
+  'Follow-up Appointment': '#1565C0',
+
+  // Lab Tests
+  'Lab Test': '#EF5350',
+  'Blood Test': '#F44336',
+  'Urine Test': '#FF7043',
+  'ECG / EKG': '#FF5252',
+
+  // Medication
+  'Medicine Intake': '#4CAF50',
+  'Daily Medication': '#66BB6A',
+  'Medication Refill': '#FF9800',
+  'Injection Schedule': '#2E7D32',
+  'Blood Sugar Check': '#E91E63',
+
+  // Health Habits
+  'Exercise': '#00ACC1',
+  'Exercise Session': '#00BCD4',
+  'Water Intake': '#26C6DA',
+  'Sleep Reminder': '#006064',
+
+  // Vital Signs
+  'Measurement': '#FFA726',
+  'Heart Rate Check': '#F06292',
+  'Blood Pressure Logging': '#EC407A',
+
+  // Preventive Care
+  'Vaccination': '#66BB6A',
+  'Annual Checkup': '#2E7D32',
+  'Dental Checkup': '#1B5E20',
+
+  // Mental Wellness
+  'Meditation': '#AED581',
+  'Breathing Exercise': '#8BC34A',
+  'Stress Check-in': '#689F38',
+
+  // General
+  'General': '#9E9E9E',
+};
+
+// Complete reminder categories
+const reminderCategories = {
+  'Medical Appointments': [
+    'Doctor Consultation',
+    'Doctor Appointment',
+    'Specialist Visit',
+    'Follow-up Appointment'
+  ],
+  'Lab Tests': [
+    'Lab Test',
+    'Blood Test',
+    'Urine Test',
+    'ECG / EKG'
+  ],
+  'Medication': [
+    'Medicine Intake',
+    'Daily Medication',
+    'Medication Refill',
+    'Injection Schedule',
+    'Blood Sugar Check'
+  ],
+  'Health Habits': [
+    'Exercise',
+    'Exercise Session',
+    'Water Intake',
+    'Sleep Reminder'
+  ],
+  'Vital Signs': [
+    'Measurement',
+    'Heart Rate Check',
+    'Blood Pressure Logging'
+  ],
+  'Preventive Care': [
+    'Vaccination',
+    'Annual Checkup',
+    'Dental Checkup'
+  ],
+  'Mental Wellness': [
+    'Meditation',
+    'Breathing Exercise',
+    'Stress Check-in'
+  ],
+  'General': ['General']
+};
 
 const RemindersScreen = ({ navigation }) => {
-  const [reminders, setReminders] = useState(initialReminders);
-  const [isModalVisible, setIsModalVisible] = useState(false);
-  const [editingReminder, setEditingReminder] = useState(null);
-  const [form, setForm] = useState({
-    id: '',
-    type: '',
-    title: '',
-    description: '',
-    dateTime: '',
-    extraInfo: '',
-    color: '#FFCA28',
-  });
+  // State declarations
+  const [currentUser, setCurrentUser] = useState(null);
+  const [loadingUser, setLoadingUser] = useState(true);
+  const [reminders, setReminders] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [modalVisible, setModalVisible] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [selectedCategory, setSelectedCategory] = useState('');
+  const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
+  const [dateTime, setDateTime] = useState(new Date());
+  const [extraInfo, setExtraInfo] = useState('');
+  const [alarmEnabled, setAlarmEnabled] = useState(true);
+  const [priority, setPriority] = useState('medium');
+  const [showCategorySelection, setShowCategorySelection] = useState(true);
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [showTimePicker, setShowTimePicker] = useState(false);
+  const [tempDate, setTempDate] = useState(new Date());
 
-  const openModal = (reminder = null) => {
-    if (reminder) {
-      setForm({
-        ...reminder,
-        dateTime: reminder.dateTime.toISOString().slice(0, 16)
-      });
-      setEditingReminder(reminder);
-    } else {
-      setForm({
-        id: '',
-        type: '',
-        title: '',
-        description: '',
-        dateTime: '',
-        extraInfo: '',
-        color: '#FFCA28',
-      });
-      setEditingReminder(null);
+  // Load user and check permissions
+  useEffect(() => {
+    loadCurrentUser();
+    checkNotificationPermissions();
+  }, []);
+
+  useEffect(() => {
+    if (currentUser?.patientId) {
+      fetchReminders();
     }
-    setIsModalVisible(true);
-  };
+  }, [currentUser]);
 
-  const closeModal = () => {
-    setIsModalVisible(false);
-    setForm({
-      id: '',
-      type: '',
-      title: '',
-      description: '',
-      dateTime: '',
-      extraInfo: '',
-      color: '#FFCA28',
-    });
-  };
+  useEffect(() => {
+    const initializeAlarms = async () => {
+      try {
+        await AlarmService.requestPermissions();
+        AlarmService.createChannels();
+      } catch (error) {
+        console.error('Alarm initialization error:', error);
+      }
+    };
+    initializeAlarms();
+  }, []);
 
-  const handleSave = () => {
-    if (editingReminder) {
-      // Update existing reminder
-      setReminders((prevReminders) =>
-        prevReminders.map((reminder) =>
-          reminder.id === editingReminder.id
-            ? { ...form, dateTime: new Date(form.dateTime) }
-            : reminder
-        )
+  const checkNotificationPermissions = async () => {
+    if (Platform.OS === 'android' && Platform.Version >= 33) {
+      const granted = await PermissionsAndroid.check(
+        PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS
       );
-    } else {
-      // Add new reminder
-      const typeColors = {
-        'Medicine Intake': '#42A5F5',
-        'Doctor Appointment': '#66BB6A',
-        'Lab Test': '#FFA726',
-        'Exercise': '#AB47BC',
-        'Medication Refill': '#EF5350',
-      };
-
-      setReminders((prevReminders) => [
-        ...prevReminders,
-        {
-          ...form,
-          id: Date.now().toString(),
-          dateTime: new Date(form.dateTime),
-          color: typeColors[form.type] || '#FFCA28'
-        },
-      ]);
+      if (!granted) {
+        Alert.alert(
+          'Notifications Required',
+          'Please enable notifications to receive reminders',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Enable', onPress: () => AlarmService.requestPermissions() }
+          ]
+        );
+      }
     }
-    closeModal();
   };
 
-  const handleDelete = (id) => {
-    setReminders((prevReminders) =>
-      prevReminders.filter((reminder) => reminder.id !== id)
+  const loadCurrentUser = async () => {
+    try {
+      const userId = await AsyncStorage.getItem('@health_app_user_id');
+      const patientId = await AsyncStorage.getItem('@health_app_patient_id') || userId;
+      const fullname = await AsyncStorage.getItem('@health_app_fullname');
+      const role = await AsyncStorage.getItem('@health_app_user_role');
+
+      if (userId) {
+        setCurrentUser({
+          userId,
+          patientId: patientId || userId,
+          fullname: fullname || 'User',
+          role: role || 'patient',
+        });
+      }
+    } catch (error) {
+      console.error('Error loading user:', error);
+    } finally {
+      setLoadingUser(false);
+    }
+  };
+
+  const fetchReminders = async () => {
+    if (!currentUser?.patientId) {
+      setLoading(false);
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const response = await getReminders(currentUser.patientId, { active_only: true });
+      if (response && response.success) {
+        setReminders(response.reminders || []);
+
+        // Schedule pending reminders
+        const pendingReminders = (response.reminders || []).filter(
+          r => !r.is_completed && new Date(r.scheduled_datetime) > new Date() && r.alarm_enabled
+        );
+
+        if (pendingReminders.length > 0) {
+          await AlarmService.checkAndSchedulePendingReminders(pendingReminders);
+        }
+      } else {
+        setReminders([]);
+      }
+    } catch (error) {
+      console.error('Error fetching reminders:', error);
+      setReminders([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await fetchReminders();
+    setRefreshing(false);
+  };
+
+  const openAddModal = () => {
+    setEditingId(null);
+    setSelectedCategory('');
+    setTitle('');
+    setDescription('');
+    setDateTime(new Date());
+    setExtraInfo('');
+    setAlarmEnabled(true);
+    setPriority('medium');
+    setShowCategorySelection(true);
+    setModalVisible(true);
+  };
+
+  const openEditModal = (reminder) => {
+    setEditingId(reminder.reminder_id);
+    setSelectedCategory(reminder.reminder_type);
+    setTitle(reminder.title);
+    setDescription(reminder.description || '');
+    setDateTime(new Date(reminder.scheduled_datetime));
+    setExtraInfo(reminder.extra_info || '');
+    setAlarmEnabled(reminder.alarm_enabled !== false);
+    setPriority(reminder.priority || 'medium');
+    setShowCategorySelection(false);
+    setModalVisible(true);
+  };
+
+  const selectCategory = (category) => {
+    setSelectedCategory(category);
+    setShowCategorySelection(false);
+  };
+
+  const onDateChange = (event, selectedDate) => {
+    setShowDatePicker(false);
+    if (selectedDate) {
+      setTempDate(selectedDate);
+      setShowTimePicker(true);
+    }
+  };
+
+  const onTimeChange = (event, selectedTime) => {
+    setShowTimePicker(false);
+    if (selectedTime) {
+      const newDateTime = new Date(tempDate);
+      newDateTime.setHours(selectedTime.getHours());
+      newDateTime.setMinutes(selectedTime.getMinutes());
+      newDateTime.setSeconds(0);
+      setDateTime(newDateTime);
+    }
+  };
+
+  const formatDateTime = () => {
+    return dateTime.toLocaleString();
+  };
+
+  const handleSave = async () => {
+    if (!title.trim()) {
+      Alert.alert('Error', 'Please enter a title');
+      return;
+    }
+
+    if (!selectedCategory) {
+      Alert.alert('Error', 'Please select a reminder type');
+      return;
+    }
+
+    if (!currentUser?.patientId) {
+      Alert.alert('Error', 'User not found');
+      return;
+    }
+
+    const reminderData = {
+      reminder_type: selectedCategory,
+      title: title.trim(),
+      description: description.trim(),
+      scheduled_datetime: dateTime.toISOString(),
+      extra_info: extraInfo.trim(),
+      color: typeColors[selectedCategory] || '#FFA726',
+      alarm_enabled: alarmEnabled,
+      priority: priority,
+    };
+
+    console.log('Saving reminder:', reminderData);
+
+    try {
+      let response;
+      if (editingId) {
+        response = await updateReminder(editingId, reminderData);
+        if (response && response.success) {
+          await AlarmService.cancelReminder(editingId);
+        }
+      } else {
+        response = await createReminder(currentUser.patientId, reminderData);
+      }
+
+      console.log('Save response:', response);
+
+      if (response && response.success) {
+        // Schedule alarm if enabled
+        if (alarmEnabled && response.reminder) {
+          await AlarmService.scheduleReminder(response.reminder);
+        }
+
+        await fetchReminders();
+        setModalVisible(false);
+        Alert.alert('Success', editingId ? 'Reminder updated!' : 'Reminder created!');
+      } else {
+        throw new Error(response?.error || 'Failed to save');
+      }
+    } catch (error) {
+      console.error('Error saving reminder:', error);
+      Alert.alert('Error', 'Failed to save reminder');
+    }
+  };
+
+  const handleDelete = (reminderId) => {
+    Alert.alert(
+      'Delete Reminder',
+      'Are you sure?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const response = await deleteReminder(reminderId);
+              if (response && response.success) {
+                await AlarmService.cancelReminder(reminderId);
+                await fetchReminders();
+                Alert.alert('Success', 'Reminder deleted');
+              }
+            } catch (error) {
+              Alert.alert('Error', 'Failed to delete');
+            }
+          },
+        },
+      ]
     );
+  };
+
+  const handleComplete = async (reminder) => {
+    Alert.alert(
+      'Complete Reminder',
+      'Mark as completed?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Yes',
+          onPress: async () => {
+            try {
+              await completeReminder(reminder.reminder_id);
+              await AlarmService.cancelReminder(reminder.reminder_id);
+              await fetchReminders();
+              Alert.alert('Success', 'Great job! 🎉');
+            } catch (error) {
+              Alert.alert('Error', 'Failed to complete');
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const testNotification = () => {
+    AlarmService.sendTestNotification('Test Notification', 'Your reminder system is working!');
+    Alert.alert('Test Sent', 'Check your notification shade');
   };
 
   const stats = {
     total: reminders.length,
-    upcoming: reminders.filter(r => r.dateTime > new Date()).length,
-    completed: reminders.filter(r => r.dateTime < new Date()).length,
+    upcoming: reminders.filter(r => new Date(r.scheduled_datetime) > new Date()).length,
+    completed: reminders.filter(r => r.is_completed).length,
     today: reminders.filter(r => {
       const today = new Date();
-      const reminderDate = new Date(r.dateTime);
-      return reminderDate.getDate() === today.getDate() &&
-             reminderDate.getMonth() === today.getMonth() &&
-             reminderDate.getFullYear() === today.getFullYear();
+      const rDate = new Date(r.scheduled_datetime);
+      return rDate.toDateString() === today.toDateString() && !r.is_completed;
     }).length,
   };
 
-  return (
-    <View style={styles.container}>
-      {/* Screen-specific Header */}
-      <View style={styles.screenHeader}>
-        <View style={styles.headerContent}>
-          <View style={styles.headerIconContainer}>
-            <FontAwesome name="clock-o" size={32} color="#FFCA28" />
-          </View>
-          <View style={styles.headerTextContainer}>
-            <Text style={styles.screenTitle}>Reminders</Text>
-            <Text style={styles.screenSubtitle}>Never miss important health tasks</Text>
-          </View>
-        </View>
-
-        {/* Stats Overview */}
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.statsScrollView}
-        >
-          <View style={styles.statsContainer}>
-            <View style={[styles.statCard, { backgroundColor: 'rgba(255, 202, 40, 0.1)' }]}>
-              <FontAwesome name="bell" size={24} color="#FFCA28" />
-              <Text style={[styles.statValue, { color: '#FFCA28' }]}>{stats.total}</Text>
-              <Text style={styles.statLabel}>Total</Text>
-            </View>
-            <View style={[styles.statCard, { backgroundColor: 'rgba(66, 165, 245, 0.1)' }]}>
-              <FontAwesome name="calendar" size={24} color="#42A5F5" />
-              <Text style={[styles.statValue, { color: '#42A5F5' }]}>{stats.upcoming}</Text>
-              <Text style={styles.statLabel}>Upcoming</Text>
-            </View>
-            <View style={[styles.statCard, { backgroundColor: 'rgba(102, 187, 106, 0.1)' }]}>
-              <FontAwesome name="check-circle" size={24} color="#66BB6A" />
-              <Text style={[styles.statValue, { color: '#66BB6A' }]}>{stats.completed}</Text>
-              <Text style={styles.statLabel}>Completed</Text>
-            </View>
-            <View style={[styles.statCard, { backgroundColor: 'rgba(239, 83, 80, 0.1)' }]}>
-              <FontAwesome name="exclamation-circle" size={24} color="#EF5350" />
-              <Text style={[styles.statValue, { color: '#EF5350' }]}>{stats.today}</Text>
-              <Text style={styles.statLabel}>Today</Text>
-            </View>
-          </View>
-        </ScrollView>
+  if (loadingUser) {
+    return (
+      <View style={styles.centerContainer}>
+        <ActivityIndicator size="large" color="#FFA726" />
       </View>
+    );
+  }
 
-      {/* Reminders List */}
-      <View style={styles.remindersSection}>
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Your Reminders</Text>
-          <TouchableOpacity style={styles.filterButton}>
-            <FontAwesome name="filter" size={16} color="#42A5F5" />
-            <Text style={styles.filterText}>Filter</Text>
-          </TouchableOpacity>
-        </View>
-
-        <ScrollView
-          showsVerticalScrollIndicator={false}
-          style={styles.remindersScrollView}
-        >
-          {reminders.map((item) => (
-            <View key={item.id} style={styles.reminderCard}>
-              <ReminderCard
-                type={item.type}
-                title={item.title}
-                description={item.description}
-                dateTime={item.dateTime}
-                extraInfo={item.extraInfo}
-                color={item.color}
-              />
-              <View style={styles.reminderActions}>
-                <TouchableOpacity
-                  style={styles.actionButton}
-                  onPress={() => openModal(item)}
-                >
-                  <FontAwesome name="edit" size={16} color="#42A5F5" />
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.actionButton}
-                  onPress={() => handleDelete(item.id)}
-                >
-                  <FontAwesome name="trash" size={16} color="#EF5350" />
-                </TouchableOpacity>
-              </View>
-            </View>
-          ))}
-        </ScrollView>
-      </View>
-
-      {/* Add Reminder Button */}
-      <View style={styles.addButtonContainer}>
-        <TouchableOpacity
-          style={styles.addButton}
-          onPress={() => openModal()}
-        >
-          <FontAwesome name="plus" size={20} color="#FFF" />
-          <Text style={styles.addButtonText}>Add New Reminder</Text>
+  if (!currentUser) {
+    return (
+      <View style={styles.centerContainer}>
+        <FontAwesome name="exclamation-triangle" size={60} color="#EF5350" />
+        <Text style={styles.errorText}>Not Logged In</Text>
+        <TouchableOpacity style={styles.loginButton} onPress={() => navigation.navigate('Login')}>
+          <Text style={styles.loginButtonText}>Go to Login</Text>
         </TouchableOpacity>
       </View>
+    );
+  }
 
-      {/* Modal for Adding/Editing Reminder */}
-      <Modal
-        visible={isModalVisible}
-        transparent={true}
-        animationType="slide"
-        onRequestClose={closeModal}
+  return (
+    <View style={styles.container}>
+      {/* User Info */}
+      <View style={styles.userBar}>
+        <Text style={styles.userName}>{currentUser.fullname}</Text>
+        <Text style={styles.userRole}>{currentUser.role}</Text>
+      </View>
+
+      {/* Header */}
+      <View style={styles.header}>
+        <FontAwesome name="clock-o" size={32} color="#FFA726" />
+        <View style={styles.headerText}>
+          <Text style={styles.title}>Health Reminders</Text>
+          <Text style={styles.subtitle}>Never miss important health tasks</Text>
+        </View>
+      </View>
+
+      {/* Stats */}
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.statsRow}>
+        <View style={[styles.statCard, { backgroundColor: 'rgba(255,167,38,0.1)' }]}>
+          <Text style={[styles.statValue, { color: '#FFA726' }]}>{stats.total}</Text>
+          <Text style={styles.statLabel}>Total</Text>
+        </View>
+        <View style={[styles.statCard, { backgroundColor: 'rgba(66,165,245,0.1)' }]}>
+          <Text style={[styles.statValue, { color: '#42A5F5' }]}>{stats.upcoming}</Text>
+          <Text style={styles.statLabel}>Upcoming</Text>
+        </View>
+        <View style={[styles.statCard, { backgroundColor: 'rgba(102,187,106,0.1)' }]}>
+          <Text style={[styles.statValue, { color: '#66BB6A' }]}>{stats.completed}</Text>
+          <Text style={styles.statLabel}>Completed</Text>
+        </View>
+        <View style={[styles.statCard, { backgroundColor: 'rgba(239,83,80,0.1)' }]}>
+          <Text style={[styles.statValue, { color: '#EF5350' }]}>{stats.today}</Text>
+          <Text style={styles.statLabel}>Today</Text>
+        </View>
+      </ScrollView>
+
+      {/* Test Notification Button (Remove in production) */}
+      <TouchableOpacity
+        style={[styles.testButton]}
+        onPress={testNotification}
       >
+        <FontAwesome name="bell" size={16} color="#FFF" />
+        <Text style={styles.testButtonText}>Test Notification</Text>
+      </TouchableOpacity>
+
+      {/* Reminders List */}
+      <View style={styles.listContainer}>
+        <Text style={styles.sectionTitle}>Your Reminders</Text>
+
+        <ScrollView
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={["#FFA726"]} />}
+        >
+          {loading ? (
+            <ActivityIndicator size="large" color="#FFA726" style={{ marginTop: 50 }} />
+          ) : reminders.length === 0 ? (
+            <View style={styles.emptyState}>
+              <FontAwesome name="bell-o" size={60} color="rgba(255,255,255,0.3)" />
+              <Text style={styles.emptyText}>No reminders yet</Text>
+              <Text style={styles.emptySubtext}>Tap the + button to create your first reminder</Text>
+            </View>
+          ) : (
+            reminders.map(item => (
+              <View key={item.reminder_id} style={styles.reminderCard}>
+                <ReminderCard
+                  type={item.reminder_type}
+                  title={item.title}
+                  description={item.description}
+                  dateTime={new Date(item.scheduled_datetime)}
+                  extraInfo={item.extra_info}
+                  color={item.color}
+                  isCompleted={item.is_completed}
+                />
+                <View style={styles.cardActions}>
+                  {!item.is_completed && (
+                    <TouchableOpacity style={styles.actionBtn} onPress={() => handleComplete(item)}>
+                      <FontAwesome name="check" size={16} color="#66BB6A" />
+                    </TouchableOpacity>
+                  )}
+                  <TouchableOpacity style={styles.actionBtn} onPress={() => openEditModal(item)}>
+                    <FontAwesome name="edit" size={16} color="#42A5F5" />
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.actionBtn} onPress={() => handleDelete(item.reminder_id)}>
+                    <FontAwesome name="trash" size={16} color="#EF5350" />
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ))
+          )}
+        </ScrollView>
+      </View>
+
+      {/* Add Button */}
+      <TouchableOpacity style={styles.addButton} onPress={openAddModal}>
+        <FontAwesome name="plus" size={20} color="#FFF" />
+        <Text style={styles.addButtonText}>Add New Reminder</Text>
+      </TouchableOpacity>
+
+      {/* Modal */}
+      <Modal visible={modalVisible} animationType="slide" transparent={true} onRequestClose={() => setModalVisible(false)}>
         <View style={modalStyles.overlay}>
           <View style={modalStyles.content}>
             <View style={modalStyles.header}>
-              <Text style={modalStyles.title}>
-                {editingReminder ? 'Edit Reminder' : 'Add New Reminder'}
-              </Text>
-              <TouchableOpacity onPress={closeModal}>
-                <FontAwesome name="times" size={24} color="rgba(255, 255, 255, 0.7)" />
+              <Text style={modalStyles.title}>{editingId ? 'Edit Reminder' : 'New Reminder'}</Text>
+              <TouchableOpacity onPress={() => setModalVisible(false)}>
+                <FontAwesome name="times" size={24} color="#FFF" />
               </TouchableOpacity>
             </View>
 
-            <ScrollView style={modalStyles.formContainer}>
-              <View style={modalStyles.inputGroup}>
-                <Text style={modalStyles.label}>Type</Text>
-                <TextInput
-                  style={modalStyles.input}
-                  placeholder="e.g., Medicine, Appointment, Exercise"
-                  placeholderTextColor="rgba(255, 255, 255, 0.4)"
-                  value={form.type}
-                  onChangeText={(text) => setForm({ ...form, type: text })}
-                />
-              </View>
+            <ScrollView>
+              {showCategorySelection && !selectedCategory ? (
+                <View>
+                  <Text style={modalStyles.label}>Select Reminder Type</Text>
+                  {Object.entries(reminderCategories).map(([category, types]) => (
+                    <View key={category} style={modalStyles.categoryBlock}>
+                      <Text style={modalStyles.categoryTitle}>{category}</Text>
+                      <View style={modalStyles.typeGrid}>
+                        {types.map(type => (
+                          <TouchableOpacity
+                            key={type}
+                            style={[modalStyles.typeBtn, { borderColor: typeColors[type] || '#FFA726' }]}
+                            onPress={() => selectCategory(type)}
+                          >
+                            <Text style={[modalStyles.typeText, { color: typeColors[type] || '#FFA726' }]}>{type}</Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    </View>
+                  ))}
+                </View>
+              ) : (
+                <View>
+                  {selectedCategory ? (
+                    <TouchableOpacity style={modalStyles.changeBtn} onPress={() => setShowCategorySelection(true)}>
+                      <Text style={modalStyles.changeText}>Current: {selectedCategory} (Tap to change)</Text>
+                    </TouchableOpacity>
+                  ) : null}
 
-              <View style={modalStyles.inputGroup}>
-                <Text style={modalStyles.label}>Title</Text>
-                <TextInput
-                  style={modalStyles.input}
-                  placeholder="Enter reminder title"
-                  placeholderTextColor="rgba(255, 255, 255, 0.4)"
-                  value={form.title}
-                  onChangeText={(text) => setForm({ ...form, title: text })}
-                />
-              </View>
+                  <TextInput
+                    style={modalStyles.input}
+                    placeholder="Title *"
+                    placeholderTextColor="rgba(255,255,255,0.4)"
+                    value={title}
+                    onChangeText={setTitle}
+                  />
 
-              <View style={modalStyles.inputGroup}>
-                <Text style={modalStyles.label}>Description</Text>
-                <TextInput
-                  style={[modalStyles.input, modalStyles.textArea]}
-                  placeholder="Add description"
-                  placeholderTextColor="rgba(255, 255, 255, 0.4)"
-                  value={form.description}
-                  onChangeText={(text) => setForm({ ...form, description: text })}
-                  multiline
-                  numberOfLines={3}
-                />
-              </View>
+                  <TextInput
+                    style={[modalStyles.input, modalStyles.textArea]}
+                    placeholder="Description"
+                    placeholderTextColor="rgba(255,255,255,0.4)"
+                    value={description}
+                    onChangeText={setDescription}
+                    multiline
+                  />
 
-              <View style={modalStyles.inputGroup}>
-                <Text style={modalStyles.label}>Date & Time</Text>
-                <TextInput
-                  style={modalStyles.input}
-                  placeholder="YYYY-MM-DDTHH:mm"
-                  placeholderTextColor="rgba(255, 255, 255, 0.4)"
-                  value={form.dateTime}
-                  onChangeText={(text) => setForm({ ...form, dateTime: text })}
-                />
-                <Text style={modalStyles.hint}>Format: 2024-11-10T08:00</Text>
-              </View>
+                  <TouchableOpacity
+                    style={modalStyles.dateBtn}
+                    onPress={() => {
+                      setTempDate(dateTime);
+                      setShowDatePicker(true);
+                    }}
+                  >
+                    <FontAwesome name="calendar" size={20} color="#FFA726" />
+                    <Text style={modalStyles.dateText}>{formatDateTime()}</Text>
+                  </TouchableOpacity>
 
-              <View style={modalStyles.inputGroup}>
-                <Text style={modalStyles.label}>Additional Info</Text>
-                <TextInput
-                  style={[modalStyles.input, modalStyles.textArea]}
-                  placeholder="Any extra details"
-                  placeholderTextColor="rgba(255, 255, 255, 0.4)"
-                  value={form.extraInfo}
-                  onChangeText={(text) => setForm({ ...form, extraInfo: text })}
-                  multiline
-                  numberOfLines={2}
-                />
-              </View>
+                  <View style={modalStyles.priorityRow}>
+                    {['low', 'medium', 'high'].map(p => (
+                      <TouchableOpacity
+                        key={p}
+                        style={[modalStyles.priorityBtn, priority === p && modalStyles.priorityActive]}
+                        onPress={() => setPriority(p)}
+                      >
+                        <Text style={[modalStyles.priorityText, priority === p && modalStyles.priorityTextActive]}>
+                          {p.toUpperCase()}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+
+                  <TextInput
+                    style={modalStyles.input}
+                    placeholder="Additional Info (dosage, location, etc.)"
+                    placeholderTextColor="rgba(255,255,255,0.4)"
+                    value={extraInfo}
+                    onChangeText={setExtraInfo}
+                  />
+
+                  <View style={modalStyles.switchRow}>
+                    <View style={modalStyles.switchLabel}>
+                      <FontAwesome name="bell" size={18} color="#FFA726" />
+                      <Text style={modalStyles.switchText}>Enable Alarm</Text>
+                    </View>
+                    <Switch value={alarmEnabled} onValueChange={setAlarmEnabled} trackColor={{ false: '#767577', true: '#FFA726' }} />
+                  </View>
+
+                  <View style={modalStyles.buttonRow}>
+                    <TouchableOpacity style={modalStyles.cancelBtn} onPress={() => setModalVisible(false)}>
+                      <Text style={modalStyles.cancelText}>Cancel</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={modalStyles.saveBtn} onPress={handleSave}>
+                      <Text style={modalStyles.saveText}>{editingId ? 'Update' : 'Create'}</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              )}
             </ScrollView>
-
-            <View style={modalStyles.buttonContainer}>
-              <TouchableOpacity
-                style={modalStyles.cancelButton}
-                onPress={closeModal}
-              >
-                <Text style={modalStyles.cancelButtonText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={modalStyles.saveButton}
-                onPress={handleSave}
-              >
-                <FontAwesome name="check" size={18} color="#FFF" style={{ marginRight: 8 }} />
-                <Text style={modalStyles.saveButtonText}>
-                  {editingReminder ? 'Update' : 'Create Reminder'}
-                </Text>
-              </TouchableOpacity>
-            </View>
           </View>
         </View>
       </Modal>
+
+      {/* DateTime Pickers */}
+      {showDatePicker && (
+        <DateTimePicker
+          value={tempDate}
+          mode="date"
+          display={Platform.OS === 'ios' ? 'spinner' : 'calendar'}
+          onChange={onDateChange}
+        />
+      )}
+
+      {showTimePicker && (
+        <DateTimePicker
+          value={tempDate}
+          mode="time"
+          display={Platform.OS === 'ios' ? 'spinner' : 'clock'}
+          onChange={onTimeChange}
+        />
+      )}
     </View>
   );
 };
@@ -370,169 +679,175 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#1A1F3E',
+    padding: 16,
   },
-  screenHeader: {
-    backgroundColor: 'rgba(26, 31, 62, 0.8)',
-    borderRadius: 24,
-    padding: 20,
-    marginHorizontal: 20,
-    marginTop: 10,
+  centerContainer: {
+    flex: 1,
+    backgroundColor: '#1A1F3E',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  userBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(118, 199, 192, 0.1)',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 16,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 12,
-    elevation: 8,
+    borderColor: '#76c7c0',
   },
-  headerContent: {
+  userName: {
+    color: '#FFF',
+    fontSize: 16,
+    fontWeight: 'bold',
+    flex: 1,
+  },
+  userRole: {
+    color: '#76c7c0',
+    fontSize: 14,
+    textTransform: 'capitalize',
+  },
+  header: {
     flexDirection: 'row',
     alignItems: 'center',
     marginBottom: 20,
+    gap: 12,
   },
-  headerIconContainer: {
-    width: 60,
-    height: 60,
-    borderRadius: 16,
-    backgroundColor: 'rgba(255, 202, 40, 0.15)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 16,
-  },
-  headerTextContainer: {
+  headerText: {
     flex: 1,
   },
-  screenTitle: {
-    fontSize: 28,
-    fontWeight: '800',
+  title: {
+    fontSize: 24,
+    fontWeight: 'bold',
     color: '#FFF',
-    letterSpacing: -0.5,
-    marginBottom: 4,
   },
-  screenSubtitle: {
-    fontSize: 15,
-    color: 'rgba(255, 255, 255, 0.7)',
-    fontWeight: '400',
+  subtitle: {
+    fontSize: 14,
+    color: 'rgba(255,255,255,0.6)',
   },
-  statsScrollView: {
-    marginTop: 10,
-  },
-  statsContainer: {
-    flexDirection: 'row',
-    paddingRight: 40,
+  statsRow: {
+    marginBottom: 20,
   },
   statCard: {
-    width: 120,
-    borderRadius: 20,
     padding: 16,
-    marginRight: 16,
+    borderRadius: 12,
+    marginRight: 12,
+    minWidth: 100,
+    alignItems: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
+    borderColor: 'rgba(255,255,255,0.1)',
   },
   statValue: {
-    fontSize: 24,
-    fontWeight: '800',
-    marginVertical: 8,
+    fontSize: 28,
+    fontWeight: 'bold',
+    marginVertical: 4,
   },
   statLabel: {
-    fontSize: 13,
-    color: 'rgba(255, 255, 255, 0.8)',
-    fontWeight: '500',
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.6)',
   },
-  remindersSection: {
-    flex: 1,
-    marginTop: 20,
-    paddingHorizontal: 20,
-  },
-  sectionHeader: {
+  testButton: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#4CAF50',
+    padding: 10,
+    borderRadius: 8,
     marginBottom: 16,
+    gap: 8,
+  },
+  testButtonText: {
+    color: '#FFF',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  listContainer: {
+    flex: 1,
   },
   sectionTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#FFF',
-    letterSpacing: 0.3,
-  },
-  filterButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(66, 165, 245, 0.1)',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(66, 165, 245, 0.3)',
-  },
-  filterText: {
-    fontSize: 14,
-    color: '#42A5F5',
+    fontSize: 18,
     fontWeight: '600',
-    marginLeft: 8,
-  },
-  remindersScrollView: {
-    flex: 1,
+    color: '#FFF',
+    marginBottom: 12,
   },
   reminderCard: {
-    backgroundColor: 'rgba(26, 31, 62, 0.6)',
-    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderRadius: 16,
     padding: 16,
     marginBottom: 12,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
+    borderColor: 'rgba(255,255,255,0.1)',
   },
-  reminderActions: {
+  cardActions: {
     flexDirection: 'row',
     justifyContent: 'flex-end',
     marginTop: 12,
     paddingTop: 12,
     borderTopWidth: 1,
-    borderTopColor: 'rgba(255, 255, 255, 0.1)',
+    borderTopColor: 'rgba(255,255,255,0.1)',
+    gap: 10,
   },
-  actionButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginLeft: 12,
+  actionBtn: {
+    padding: 8,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255,255,255,0.05)',
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
-  },
-  addButtonContainer: {
-    paddingHorizontal: 20,
-    paddingBottom: 30,
-    paddingTop: 20,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255, 255, 255, 0.1)',
+    borderColor: 'rgba(255,255,255,0.1)',
   },
   addButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(255, 202, 40, 0.15)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 202, 40, 0.3)',
-    paddingVertical: 16,
-    paddingHorizontal: 24,
-    borderRadius: 16,
+    backgroundColor: '#FFA726',
+    padding: 16,
+    borderRadius: 12,
+    marginTop: 16,
+    gap: 10,
   },
   addButtonText: {
+    color: '#FFF',
     fontSize: 16,
     fontWeight: '600',
+  },
+  emptyState: {
+    alignItems: 'center',
+    paddingVertical: 60,
+  },
+  emptyText: {
+    fontSize: 18,
     color: '#FFF',
-    marginLeft: 10,
-    letterSpacing: 0.3,
+    marginTop: 16,
+    fontWeight: '600',
+  },
+  emptySubtext: {
+    fontSize: 14,
+    color: 'rgba(255,255,255,0.4)',
+    marginTop: 8,
+    textAlign: 'center',
+  },
+  errorText: {
+    color: '#FFF',
+    fontSize: 18,
+    marginTop: 20,
+  },
+  loginButton: {
+    marginTop: 20,
+    paddingHorizontal: 30,
+    paddingVertical: 12,
+    backgroundColor: '#FFA726',
+    borderRadius: 8,
+  },
+  loginButtonText: {
+    color: '#FFF',
+    fontWeight: 'bold',
   },
 });
 
 const modalStyles = StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+    backgroundColor: 'rgba(0,0,0,0.8)',
     justifyContent: 'center',
     padding: 20,
   },
@@ -541,8 +856,8 @@ const modalStyles = StyleSheet.create({
     borderRadius: 24,
     padding: 24,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
-    maxHeight: '80%',
+    borderColor: 'rgba(255,255,255,0.1)',
+    maxHeight: '85%',
   },
   header: {
     flexDirection: 'row',
@@ -555,69 +870,147 @@ const modalStyles = StyleSheet.create({
     fontWeight: '700',
     color: '#FFF',
   },
-  formContainer: {
-    flex: 1,
-  },
-  inputGroup: {
-    marginBottom: 20,
-  },
   label: {
     fontSize: 16,
     fontWeight: '600',
     color: '#FFF',
-    marginBottom: 8,
+    marginBottom: 16,
+  },
+  categoryBlock: {
+    marginBottom: 24,
+  },
+  categoryTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#FFA726',
+    marginBottom: 12,
+  },
+  typeGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  typeBtn: {
+    borderWidth: 1,
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+  },
+  typeText: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  changeBtn: {
+    backgroundColor: 'rgba(255,167,38,0.1)',
+    padding: 12,
+    borderRadius: 12,
+    marginBottom: 20,
+    alignItems: 'center',
+  },
+  changeText: {
+    color: '#FFA726',
+    fontSize: 14,
   },
   input: {
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    backgroundColor: 'rgba(255,255,255,0.05)',
     borderRadius: 12,
     padding: 16,
     color: '#FFF',
     fontSize: 16,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
+    borderColor: 'rgba(255,255,255,0.1)',
+    marginBottom: 16,
   },
   textArea: {
     minHeight: 80,
     textAlignVertical: 'top',
   },
-  hint: {
-    fontSize: 12,
-    color: 'rgba(255, 255, 255, 0.5)',
-    marginTop: 6,
-    fontStyle: 'italic',
+  dateBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    marginBottom: 16,
+    gap: 12,
   },
-  buttonContainer: {
+  dateText: {
+    color: '#FFF',
+    fontSize: 16,
+  },
+  priorityRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 16,
+  },
+  priorityBtn: {
+    flex: 1,
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 12,
+    alignItems: 'center',
+    borderColor: 'rgba(255,255,255,0.2)',
+  },
+  priorityActive: {
+    backgroundColor: '#FFA726',
+    borderColor: '#FFA726',
+  },
+  priorityText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#FFF',
+  },
+  priorityTextActive: {
+    color: '#1A1F3E',
+  },
+  switchRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginTop: 24,
+    alignItems: 'center',
+    marginTop: 8,
+    marginBottom: 24,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.1)',
   },
-  cancelButton: {
+  switchLabel: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  switchText: {
+    fontSize: 16,
+    color: '#FFF',
+  },
+  buttonRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  cancelBtn: {
     flex: 1,
     alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    backgroundColor: 'rgba(255,255,255,0.05)',
     paddingVertical: 16,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
-    marginRight: 12,
+    borderColor: 'rgba(255,255,255,0.1)',
   },
-  cancelButtonText: {
-    color: 'rgba(255, 255, 255, 0.8)',
+  cancelText: {
+    color: 'rgba(255,255,255,0.8)',
     fontSize: 16,
     fontWeight: '600',
   },
-  saveButton: {
+  saveBtn: {
     flex: 2,
-    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
     backgroundColor: '#42A5F5',
     paddingVertical: 16,
     borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#42A5F5',
   },
-  saveButtonText: {
+  saveText: {
     color: '#FFF',
     fontSize: 16,
     fontWeight: '600',
